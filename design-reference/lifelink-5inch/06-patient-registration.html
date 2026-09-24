@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Clinical Registration</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>CLINICAL RECORD</strong> · ELEANOR R. VANCE · #LL-8942-A</span>
+    <span>HL7 FHIR SYNCED</span>
+  </div>
+
+  <!-- Section tabs -->
+  <div class="flex gap-1 px-3 pt-2" style="background:var(--surface);">
+    <div class="px-3 py-1 rounded-t-md" style="background:var(--primary);color:#fff;font-size:10px;font-weight:700;">ALLERGIES</div>
+    <div class="px-3 py-1 rounded-t-md" style="background:var(--surface-container);color:var(--on-surface-variant);font-size:10px;font-weight:700;">MEDICATIONS</div>
+    <div class="px-3 py-1 rounded-t-md" style="background:var(--surface-container);color:var(--on-surface-variant);font-size:10px;font-weight:700;">CONDITIONS</div>
+    <div class="px-3 py-1 rounded-t-md" style="background:var(--surface-container);color:var(--on-surface-variant);font-size:10px;font-weight:700;">SURGICAL</div>
+    <div class="px-3 py-1 rounded-t-md" style="background:var(--surface-container);color:var(--on-surface-variant);font-size:10px;font-weight:700;">DEVICES</div>
+  </div>
+
+  <main class="main px-3 pb-2 scroll">
+
+    <div class="banner-critical px-3 py-2 mt-2 flex items-start gap-2">
+      <span style="font-size:14px;">⚠</span>
+      <div class="flex-1">
+        <div style="font-size:12px;font-weight:700;">PENICILLIN — SEVERE ANAPHYLAXIS RISK</div>
+        <div style="font-size:10px;opacity:0.9;">RxNorm #7980 · Do not administer beta-lactams or cephalosporins</div>
+      </div>
+      <span style="font-size:16px;line-height:1;">×</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 mt-2">
+      <div class="card px-3 py-2 flex items-center justify-between">
+        <div>
+          <div style="font-size:12px;font-weight:700;">Peanuts</div>
+          <div style="font-size:9px;color:var(--on-surface-variant);">Angioedema / Airway threat</div>
+        </div>
+        <span class="chip chip-critical">SEVERE</span>
+      </div>
+      <div class="card px-3 py-2 flex items-center justify-between">
+        <div>
+          <div style="font-size:12px;font-weight:700;">Latex</div>
+          <div style="font-size:9px;color:var(--on-surface-variant);">Contact dermatitis</div>
+        </div>
+        <span class="chip chip-warning">MILD</span>
+      </div>
+    </div>
+
+    <button class="card w-full mt-2 py-2 flex items-center justify-center gap-2" style="border-style:dashed;color:var(--on-surface-variant);font-size:11px;font-weight:600;">
+      + Add Allergen (Drug / Food / Environmental)
+    </button>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Back</button>
+    <div class="btn btn-ghost mono" style="flex:1;font-size:9px;">TAB 1 / 5</div>
+    <button class="btn btn-primary">Save &amp; Next</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

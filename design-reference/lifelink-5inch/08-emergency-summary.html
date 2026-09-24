@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Emergency Clinical Summary</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>RAPID TRIAGE</strong> · 10-SEC ASSESSMENT</span>
+    <span>#LL-8942-A · BIOMETRIC VERIFIED</span>
+  </div>
+
+  <main class="main px-3 py-2 scroll">
+
+    <!-- Identity + blood strip -->
+    <div class="flex gap-2">
+      <div class="card px-3 py-2" style="flex:1;">
+        <div class="flex items-center gap-2">
+          <span class="chip chip-critical">PRIORITY 1</span>
+          <span class="chip">FULL CODE</span>
+          <span class="chip">DONOR: YES</span>
+        </div>
+        <div class="flex items-baseline gap-2 mt-1">
+          <span style="font-size:16px;font-weight:700;">Eleanor R. Vance</span>
+          <span style="font-size:11px;color:var(--on-surface-variant);">42 YRS · FEMALE</span>
+        </div>
+        <div class="mono" style="font-size:9px;color:var(--on-surface-variant);">MASS 68.2KG · HEIGHT 168CM · BMI 24.2</div>
+      </div>
+      <div class="blood-badge px-3 py-2 flex flex-col justify-center items-center" style="width:120px;">
+        <div style="font-size:9px;opacity:0.85;">BLOOD GROUP</div>
+        <div style="font-size:20px;font-weight:800;line-height:1.1;">O NEG</div>
+        <div style="font-size:8px;opacity:0.85;text-align:center;">UNIVERSAL DONOR</div>
+      </div>
+    </div>
+
+    <!-- Critical allergy -->
+    <div class="banner-critical px-3 py-2 mt-2">
+      <div style="font-size:11px;font-weight:700;">⚠ HALT — PENICILLIN: SEVERE ANAPHYLAXIS RISK</div>
+      <div style="font-size:9px;opacity:0.9;">Do not administer beta-lactams / cephalosporins · Peanuts (severe) · Latex (mild)</div>
+    </div>
+
+    <!-- Compact 2-col facts -->
+    <div class="grid grid-cols-2 gap-2 mt-2">
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Active Medications</div>
+        <div style="font-size:11px;font-weight:600;">Metformin HCl 500mg BID</div>
+        <div style="font-size:11px;font-weight:600;">Lisinopril 10mg QD</div>
+      </div>
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Active Conditions</div>
+        <div style="font-size:11px;font-weight:600;">Type 2 Diabetes — E11.9</div>
+        <div style="font-size:11px;font-weight:600;">Hypertension — I10</div>
+      </div>
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Surgical History</div>
+        <div style="font-size:11px;font-weight:600;">2021 Cholecystectomy</div>
+        <div style="font-size:11px;font-weight:600;">2018 Appendectomy</div>
+      </div>
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Next of Kin</div>
+        <div style="font-size:11px;font-weight:600;">David Vance (Spouse)</div>
+        <div class="mono" style="font-size:10px;color:var(--on-surface-variant);">+1 (555) 492-8810</div>
+      </div>
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Return</button>
+    <button class="btn btn-ghost">Print Tape</button>
+    <button class="btn btn-primary">Page Attending</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

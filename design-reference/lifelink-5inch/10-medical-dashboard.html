@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Medical Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>MEDICAL DASHBOARD</strong> · BIOMETRIC ID MATCHED 99.8%</span>
+    <span>ENCLAVE VERIFIED</span>
+  </div>
+
+  <main class="main px-3 py-2 flex flex-col gap-2">
+
+    <!-- Identity row -->
+    <div class="flex items-center gap-2">
+      <div style="width:42px;height:42px;border-radius:8px;background:var(--surface-container-high);flex:none;display:flex;align-items:center;justify-content:center;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#444748" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      </div>
+      <div class="flex-1">
+        <div style="font-size:15px;font-weight:700;">Eleanor R. Vance</div>
+        <div style="font-size:10px;color:var(--on-surface-variant);">42 YRS · FEMALE · #LL-8942-A</div>
+      </div>
+      <span class="chip" style="background:var(--tertiary-container);color:#fff;">O NEG</span>
+      <span class="chip chip-success">FULL CODE</span>
+    </div>
+
+    <!-- Critical allergy strip -->
+    <div class="banner-critical px-3 py-1.5 flex items-center justify-between">
+      <span style="font-size:10px;font-weight:700;">⚠ PENICILLIN — SEVERE ANAPHYLAXIS · PEANUTS · LATEX</span>
+    </div>
+
+    <!-- Action grid -->
+    <div class="grid grid-cols-2 gap-2" style="flex:1;">
+      <button class="card flex items-center gap-2 px-3" style="border-color:#1a1c1c;border-width:1.5px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="2"><path d="M12 2l7 4v6c0 5-3.5 8-7 10-3.5-2-7-5-7-10V6l7-4z"/></svg>
+        <span style="font-size:12px;font-weight:700;">AI Clinical Summary</span>
+      </button>
+      <button class="card flex items-center gap-2 px-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+        <span style="font-size:12px;font-weight:700;">Full History</span>
+      </button>
+      <button class="card flex items-center gap-2 px-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="2"><circle cx="12" cy="8" r="3"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>
+        <span style="font-size:12px;font-weight:700;">Update Profile</span>
+      </button>
+      <button class="card flex items-center gap-2 px-3">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        <span style="font-size:12px;font-weight:700;">Trauma Export</span>
+      </button>
+    </div>
+
+    <!-- Telemetry mini row -->
+    <div class="flex gap-2">
+      <div class="card px-2 py-1.5 flex-1 text-center">
+        <div style="font-size:8px;color:var(--on-surface-variant);">GLUCOSE</div>
+        <div style="font-size:13px;font-weight:700;">142 <span style="font-size:8px;font-weight:400;">mg/dL</span></div>
+      </div>
+      <div class="card px-2 py-1.5 flex-1 text-center">
+        <div style="font-size:8px;color:var(--on-surface-variant);">PULSE</div>
+        <div style="font-size:13px;font-weight:700;">72 <span style="font-size:8px;font-weight:400;">bpm</span></div>
+      </div>
+      <div class="card px-2 py-1.5 flex-1 text-center">
+        <div style="font-size:8px;color:var(--on-surface-variant);">SpO2</div>
+        <div style="font-size:13px;font-weight:700;">99 <span style="font-size:8px;font-weight:400;">%</span></div>
+      </div>
+      <div class="card px-2 py-1.5 flex-1 text-center" style="flex:1.6;">
+        <div style="font-size:8px;color:var(--on-surface-variant);">PROXY · DAVID VANCE</div>
+        <div class="mono" style="font-size:11px;font-weight:700;">+1 555 492-8810</div>
+      </div>
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Back to Standby</button>
+    <button class="btn btn-critical">Call Proxy</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

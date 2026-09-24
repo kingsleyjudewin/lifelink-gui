@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Patient Photo Capture</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>PATIENT PHOTO</strong> · STEP 3 OF 3</span>
+    <span>USB WEBCAM · 1280×720</span>
+  </div>
+
+  <main class="main px-3 py-2 flex gap-3" style="min-height:0;">
+
+    <div class="viewport" style="flex:1.05;">
+      <!-- live camera feed placeholder -->
+      <div style="position:absolute;inset:0;background:linear-gradient(160deg,#1c1f1f,#0d0f0f);"></div>
+      <div style="position:relative;width:120px;height:150px;border:1.5px dashed rgba(255,255,255,0.55);border-radius:60px 60px 50px 50px;"></div>
+      <span class="corner" style="top:8px;left:8px;border-top:2px solid;border-left:2px solid;"></span>
+      <span class="corner" style="top:8px;right:8px;border-top:2px solid;border-right:2px solid;"></span>
+      <span class="corner" style="bottom:8px;left:8px;border-bottom:2px solid;border-left:2px solid;"></span>
+      <span class="corner" style="bottom:8px;right:8px;border-bottom:2px solid;border-right:2px solid;"></span>
+      <div class="hint">CENTER FACE IN FRAME</div>
+    </div>
+
+    <div class="flex flex-col gap-2" style="flex:0.95; min-width:0;">
+
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Purpose</div>
+        <div style="font-size:13px;font-weight:700;">ID Photo for Medical Record</div>
+        <div style="font-size:10px;color:var(--on-surface-variant);">Attached to patient profile · not used for biometric match</div>
+      </div>
+
+      <div class="card px-2 py-2" style="flex:1;">
+        <div class="card-title mb-1">Frame Check</div>
+
+        <div class="flex items-center justify-between py-1">
+          <span style="font-size:11px;">Face detected</span>
+          <span class="chip chip-success">OK</span>
+        </div>
+        <div class="flex items-center justify-between py-1">
+          <span style="font-size:11px;">Lighting</span>
+          <span class="chip chip-success">GOOD</span>
+        </div>
+        <div class="flex items-center justify-between py-1">
+          <span style="font-size:11px;">Centered &amp; level</span>
+          <span class="chip chip-warning">ADJUST</span>
+        </div>
+
+        <div class="divider my-2"></div>
+        <div class="flex justify-between mono" style="font-size:9px;color:var(--on-surface-variant);">
+          <span>CAMERA</span><span style="color:var(--on-surface);font-weight:700;">USB WEBCAM · ONLINE</span>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Back</button>
+    <button class="btn btn-ghost">Skip Photo</button>
+    <button class="btn btn-primary">Capture Photo</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

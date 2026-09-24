@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Identify Patient</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>IDENTIFY PATIENT</strong> · SELECT MODALITY</span>
+    <span>142,890 RECORDS SYNCED</span>
+  </div>
+
+  <main class="main px-4 py-3 flex flex-col gap-2">
+
+    <div class="grid grid-cols-2 gap-3" style="flex:1;">
+
+      <button class="tap-tile" style="border-color:#1a1c1c;border-width:2px;">
+        <div class="tap-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="1.8"><path d="M12 11a4 4 0 014 4v3M8 15v3M12 3a9 9 0 00-9 9c0 2 .5 3 1 4M12 3a9 9 0 019 9c0 3-1 5-1 5M12 7a5 5 0 00-5 5c0 2 .5 3 1 4"/></svg>
+        </div>
+        <div class="tap-title">Fingerprint</div>
+        <div class="tap-sub">Fast 1:N trauma matching</div>
+        <span class="chip chip-success" style="margin-top:2px;">SENSOR READY</span>
+      </button>
+
+      <button class="tap-tile">
+        <div class="tap-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="#1a1c1c"/></svg>
+        </div>
+        <div class="tap-title">Iris Scan</div>
+        <div class="tap-sub">Zero-contact, sterile field</div>
+        <span class="chip chip-success" style="margin-top:2px;">SENSOR READY</span>
+      </button>
+
+    </div>
+
+    <div class="card px-3 py-2 flex items-center justify-between" style="font-size:10px;">
+      <span class="flex items-center gap-2" style="white-space:nowrap;"><span class="status-dot live"></span><strong>WAITING</strong> — present finger or look into iris aperture</span>
+      <span class="mono text-muted" style="white-space:nowrap;">LATENCY &lt;120MS</span>
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Manual MRN Search</button>
+    <button class="btn btn-primary">Start Fingerprint Scan</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

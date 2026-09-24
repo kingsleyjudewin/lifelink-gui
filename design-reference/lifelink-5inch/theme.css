@@ -1,0 +1,287 @@
+/* LifeLink — compact terminal theme for 800x480 kiosk displays.
+   Self-hosted, no external font/CSS dependency (must survive offline). */
+
+:root {
+  --surface: #faf9f9;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f4f3f3;
+  --surface-container: #eeeeee;
+  --surface-container-high: #e8e8e8;
+  --on-surface: #1a1c1c;
+  --on-surface-variant: #444748;
+  --outline: #747878;
+  --outline-variant: #c4c7c7;
+  --primary: #000000;
+  --on-primary: #ffffff;
+  --error: #ba1a1a;
+  --error-container: #ffdad6;
+  --on-error-container: #93000a;
+  --tertiary-container: #410004;
+  --on-tertiary: #ffffff;
+  --success: #3a7a3a;
+  --success-container: #e3f1e3;
+  --warning: #8a6300;
+  --warning-container: #fff1cc;
+
+  --topbar-h: 32px;
+  --modulebar-h: 20px;
+  --bottombar-h: 50px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  width: 800px;
+  height: 480px;
+  margin: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--on-surface);
+  font-family: "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Courier New", monospace;
+}
+
+/* ---------- Shell ---------- */
+
+.screen {
+  width: 800px;
+  height: 480px;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--outline-variant);
+  background: var(--surface-container-lowest);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: none;
+}
+.status-dot.live { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.brand {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--on-surface);
+}
+
+.clock {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--on-surface);
+  white-space: nowrap;
+}
+
+.modulebar {
+  height: var(--modulebar-h);
+  min-height: var(--modulebar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: var(--surface-container);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.modulebar strong { color: var(--on-surface); font-weight: 700; }
+
+.main {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.bottombar {
+  height: var(--bottombar-h);
+  min-height: var(--bottombar-h);
+  display: flex;
+  gap: 1px;
+  background: var(--outline-variant);
+  border-top: 1px solid var(--outline-variant);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  flex: 2;
+}
+
+.btn-critical {
+  background: var(--error);
+  color: #fff;
+}
+
+.btn-ghost {
+  background: var(--surface-container-lowest);
+  color: var(--on-surface-variant);
+}
+
+.tap-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--outline-variant);
+  border-radius: 10px;
+  background: var(--surface-container-lowest);
+}
+
+.tap-tile .tap-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-container-high);
+}
+
+.tap-tile .tap-title { font-size: 14px; font-weight: 700; }
+.tap-tile .tap-sub { font-size: 10px; color: var(--on-surface-variant); text-align: center; padding: 0 14px; }
+
+/* ---------- Cards / chips ---------- */
+
+.card {
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  border-radius: 8px;
+}
+
+.card-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: var(--surface-container);
+  color: var(--on-surface-variant);
+}
+.chip-critical { background: var(--error); color: #fff; }
+.chip-warning { background: var(--warning-container); color: var(--warning); }
+.chip-success { background: var(--success-container); color: var(--success); }
+.chip-dark { background: var(--primary); color: #fff; }
+
+.banner-critical {
+  background: var(--error);
+  color: #fff;
+  border-radius: 8px;
+}
+
+.blood-badge {
+  background: var(--tertiary-container);
+  color: var(--on-tertiary);
+  border-radius: 8px;
+}
+
+/* ---------- Capture viewport (fingerprint / iris / photo) ---------- */
+
+.viewport {
+  position: relative;
+  background: #0d0f0f;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewport .reticle {
+  border: 1.5px dashed rgba(255,255,255,0.5);
+  border-radius: 50%;
+}
+
+.viewport .hint {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 9px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.viewport .corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: rgba(255,255,255,0.7);
+}
+
+/* ---------- Utility ---------- */
+
+.text-error { color: var(--error); }
+.text-muted { color: var(--on-surface-variant); }
+.divider { height: 1px; background: var(--outline-variant); border: none; margin: 0; }

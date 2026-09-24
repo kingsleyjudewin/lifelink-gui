@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — AI Medical Summary</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>AI MEDICAL SUMMARY</strong> · EXECUTIVE BRIEFING</span>
+    <span class="chip chip-dark" style="font-size:8px;">98.4% CONFIDENCE</span>
+  </div>
+
+  <main class="main px-3 py-2 scroll">
+
+    <!-- Primary directive — biggest, boldest, first -->
+    <div class="banner-critical px-3 py-2">
+      <div style="font-size:12px;font-weight:800;">⚠ ABSOLUTE EXCLUSION: PENICILLINS, CEPHALOSPORINS</div>
+      <div style="font-size:9px;opacity:0.9;">Historical acute IgE anaphylaxis · Peanuts (severe) &amp; latex (contact) barrier protocols enforced</div>
+    </div>
+
+    <!-- Identity + blood -->
+    <div class="flex gap-2 mt-2">
+      <div class="card px-3 py-2 flex-1 flex items-center justify-between">
+        <div>
+          <div style="font-size:14px;font-weight:700;">Eleanor R. Vance</div>
+          <div style="font-size:10px;color:var(--on-surface-variant);">42 YRS · FEMALE · #LL-8942-A</div>
+        </div>
+        <span class="chip" style="background:var(--tertiary-container);color:#fff;font-size:11px;padding:4px 10px;">O NEGATIVE</span>
+      </div>
+    </div>
+
+    <!-- Directives, numbered, scannable -->
+    <div class="card px-3 py-2 mt-2">
+      <div class="card-title mb-1">Emergency Directives</div>
+      <div style="font-size:11px;"><strong class="mono">01</strong> Mandatory bedside glucometry before IV dextrose or insulin</div>
+      <div style="font-size:11px;margin-top:3px;"><strong class="mono">02</strong> Latex-free theatre clearance — synthetic nitrile only</div>
+      <div style="font-size:11px;margin-top:3px;"><strong class="mono">03</strong> Antimicrobials: fluoroquinolone / macrolide / vancomycin only</div>
+    </div>
+
+    <!-- Compact diagnoses + meds -->
+    <div class="grid grid-cols-2 gap-2 mt-2">
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Diagnoses</div>
+        <div style="font-size:11px;font-weight:600;">Type 2 Diabetes · E11.9</div>
+        <div style="font-size:11px;font-weight:600;">Hypertension · I10</div>
+      </div>
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Pharmacotherapy</div>
+        <div style="font-size:11px;font-weight:600;">Metformin 500mg BID</div>
+        <div style="font-size:11px;font-weight:600;">Lisinopril 10mg QD</div>
+      </div>
+    </div>
+
+    <!-- Technical metadata, demoted -->
+    <div class="mono mt-2" style="font-size:8px;color:var(--outline);">
+      NEURALMED V4.2-EHR · SHA-256 7F4C8A90B2…E109 · SYNTHESIS LATENCY 240MS · FHIR R4 CONVERGENT
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Return to Record</button>
+    <button class="btn btn-ghost">Export FHIR JSON</button>
+    <button class="btn btn-primary">Print</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Enrollment Verification</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>ENROLLMENT VERIFICATION</strong> · FINAL REVIEW</span>
+    <span>NIST SP 800-76 COMPLIANT</span>
+  </div>
+
+  <main class="main px-3 py-2 flex gap-3" style="min-height:0;">
+
+    <div class="flex flex-col gap-2" style="flex:1;">
+      <div class="card px-3 py-2" style="background:var(--success-container);border-color:var(--success);">
+        <div class="flex items-center gap-2">
+          <span style="font-size:14px;color:var(--success);">✓</span>
+          <span style="font-size:11px;font-weight:700;color:var(--success);">ALL INTEGRITY CHECKS PASSED — READY TO COMMIT</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2" style="flex:1;">
+        <div class="card px-2 py-2">
+          <div class="flex items-center justify-between"><span class="card-title">Biometric</span><span style="color:var(--success);">✓</span></div>
+          <div style="font-size:11px;font-weight:700;margin-top:2px;">10/10 Fingerprints</div>
+          <div style="font-size:9px;color:var(--on-surface-variant);">99.4% NIST valid</div>
+        </div>
+        <div class="card px-2 py-2">
+          <div class="flex items-center justify-between"><span class="card-title">Biometric</span><span style="color:var(--success);">✓</span></div>
+          <div style="font-size:11px;font-weight:700;margin-top:2px;">Bilateral Iris</div>
+          <div style="font-size:9px;color:var(--on-surface-variant);">Hamming dist. 0.18</div>
+        </div>
+        <div class="card px-2 py-2">
+          <div class="flex items-center justify-between"><span class="card-title">Identity</span><span style="color:var(--success);">✓</span></div>
+          <div style="font-size:11px;font-weight:700;margin-top:2px;">Demographics Clear</div>
+          <div style="font-size:9px;color:var(--on-surface-variant);">Next of kin verified</div>
+        </div>
+        <div class="card px-2 py-2">
+          <div class="flex items-center justify-between"><span class="card-title">Clinical</span><span style="color:var(--success);">✓</span></div>
+          <div style="font-size:11px;font-weight:700;margin-top:2px;">Record Logged</div>
+          <div style="font-size:9px;color:var(--on-surface-variant);">Allergies &amp; directives signed</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card px-3 py-2" style="flex:0.8;">
+      <div class="card-title mb-1">Identity Summary</div>
+      <div style="font-size:14px;font-weight:700;">Eleanor R. Vance</div>
+      <div style="font-size:10px;color:var(--on-surface-variant);">DOB 14-MAY-1984 · 42 YRS · Female</div>
+      <div class="divider my-2"></div>
+      <div class="flex items-center justify-between">
+        <span style="font-size:10px;color:var(--on-surface-variant);">BLOOD GROUP</span>
+        <span class="chip" style="background:var(--tertiary-container);color:#fff;">O NEGATIVE</span>
+      </div>
+      <div class="flex items-center justify-between mt-2">
+        <span style="font-size:10px;color:var(--on-surface-variant);">MEDICAL ID</span>
+        <span class="mono" style="font-size:10px;font-weight:700;">#LL-8942-A</span>
+      </div>
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Edit Information</button>
+    <button class="btn btn-primary" style="flex:2;">Commit &amp; Create Patient Record</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

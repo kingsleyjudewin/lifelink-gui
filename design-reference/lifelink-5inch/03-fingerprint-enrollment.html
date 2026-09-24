@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Fingerprint Enrollment</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>FINGERPRINT ENROLLMENT</strong> · STEP 1 OF 3</span>
+    <span>0 / 10 DIGITS CAPTURED</span>
+  </div>
+
+  <main class="main px-3 py-2 flex gap-3" style="min-height:0;">
+
+    <div class="viewport" style="flex:1.05;">
+      <svg width="120" height="150" viewBox="0 0 120 150" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="1.4">
+        <ellipse cx="60" cy="75" rx="46" ry="66"/>
+        <ellipse cx="60" cy="75" rx="36" ry="54"/>
+        <ellipse cx="60" cy="75" rx="26" ry="42"/>
+        <ellipse cx="60" cy="75" rx="16" ry="30"/>
+        <circle cx="60" cy="75" r="2.5" fill="rgba(255,255,255,0.85)"/>
+      </svg>
+      <span class="corner" style="top:8px;left:8px;border-top:2px solid;border-left:2px solid;"></span>
+      <span class="corner" style="top:8px;right:8px;border-top:2px solid;border-right:2px solid;"></span>
+      <span class="corner" style="bottom:8px;left:8px;border-bottom:2px solid;border-left:2px solid;"></span>
+      <span class="corner" style="bottom:8px;right:8px;border-bottom:2px solid;border-right:2px solid;"></span>
+      <div class="hint">AWAITING EPIDERMAL CONTACT</div>
+    </div>
+
+    <div class="flex flex-col gap-2" style="flex:0.95; min-width:0;">
+
+      <div class="card px-2 py-2">
+        <div class="card-title mb-1">Target Digit</div>
+        <div class="flex items-center justify-between">
+          <span style="font-size:15px;font-weight:700;">Right Thumb</span>
+          <span class="chip chip-warning">WAITING</span>
+        </div>
+      </div>
+
+      <div class="card px-2 py-2" style="flex:1;">
+        <div class="card-title mb-1">Enrollment Matrix</div>
+        <div class="grid grid-cols-5 gap-1 mono" style="font-size:9px;">
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">L5</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">L4</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">L3</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">L2</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">L1</div>
+          <div class="text-center py-1 rounded text-white" style="background:var(--primary);">R1</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">R2</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">R3</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">R4</div>
+          <div class="text-center py-1 rounded" style="background:var(--surface-container-high);">R5</div>
+        </div>
+        <div class="divider my-2"></div>
+        <div class="flex justify-between mono" style="font-size:9px;color:var(--on-surface-variant);">
+          <span>SENSOR</span><span style="color:var(--on-surface);font-weight:700;">500 DPI OPTICAL</span>
+        </div>
+        <div class="flex justify-between mono mt-1" style="font-size:9px;color:var(--on-surface-variant);">
+          <span>QUALITY MIN</span><span style="color:var(--on-surface);font-weight:700;">98% NIST</span>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <div class="bottombar">
+    <button class="btn btn-ghost">Back</button>
+    <button class="btn btn-ghost">Re-center</button>
+    <button class="btn btn-primary">Scan Finger</button>
+  </div>
+
+</div>
+<script>
+  function tick(){ document.getElementById('clock').textContent = new Date().toTimeString().slice(0,5); }
+  tick(); setInterval(tick, 30000);
+</script>
+</body>
+</html>

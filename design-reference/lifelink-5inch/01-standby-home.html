@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>LifeLink — Standby</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="theme.css"/>
+</head>
+<body>
+<div class="screen">
+
+  <header class="topbar">
+    <div class="topbar-left"><span class="status-dot live"></span>TRAUMA / BAY 01</div>
+    <div class="brand">LIFELINK</div>
+    <div class="clock mono" id="clock">05:58</div>
+  </header>
+
+  <div class="modulebar">
+    <span><strong>STANDBY</strong> · READY</span>
+    <span>AES-256 · HIPAA-4</span>
+  </div>
+
+  <main class="main px-4 py-3 flex flex-col justify-center gap-2">
+
+    <button class="w-full flex items-center gap-3 rounded-lg text-white px-4" style="background:var(--primary); height:92px;">
+      <div class="rounded-full flex items-center justify-center" style="width:40px;height:40px;background:rgba(255,255,255,0.12);">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+      <div class="flex-1 text-left">
+        <div style="font-size:16px;font-weight:700;">Register Patient</div>
+        <div style="font-size:11px;color:#cfcfcf;">Initiate rapid biometric enrollment</div>
+      </div>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#cfcfcf" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
+
+    <button class="w-full flex items-center gap-3 rounded-lg card px-4" style="height:92px;">
+      <div class="rounded-full flex items-center justify-center" style="width:40px;height:40px;background:var(--surface-container-high);">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      </div>
+      <div class="flex-1 text-left">
+        <div style="font-size:16px;font-weight:700;">Identify Patient</div>
+        <div style="font-size:11px;color:var(--on-surface-variant);">Biometric lookup &amp; medical record retrieval</div>
+      </div>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#747878" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
+
+    <button class="w-full flex items-center gap-3 rounded-lg card px-4" style="height:60px;">
+      <div class="rounded-full flex items-center justify-center" style="width:30px;height:30px;background:var(--surface-container-high);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1c1c" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.11.35.3.66.56.92"/></svg>
+      </div>
+      <div class="flex-1 text-left">
+        <div style="font-size:13px;font-weight:700;">Settings</div>
+        <div style="font-size:10px;color:var(--on-surface-variant);">Hardware calibration &amp; diagnostics</div>
+      </div>
+    </button>
+
+  </main>
+
+  <div class="bottombar">
+    <div class="btn" style="background:var(--error-container);color:var(--on-error-container);flex:1;font-size:10px;">
+      EMERGENCY OVERRIDE — PRESS &amp; HOLD [*]
+    </div>
+    <div class="btn btn-ghost mono" style="flex:1;font-size:9px;">
+      CLOUD ● FP ● IRIS ● 38.2°C
+    </div>
+  </div>
+
+</div>
+<script>
+  function tick(){
+    const d = new Date();
+    document.getElementById('clock').textContent = d.toTimeString().slice(0,5);
+  }
+  tick(); setInterval(tick, 1000*30);
+</script>
+</body>
+</html>
