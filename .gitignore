@@ -1,1 +1,16 @@
 .claude/
+
+# Backend
+backend/.venv/
+backend/__pycache__/
+backend/uploads/*
+!backend/uploads/.gitkeep
+.env
+*.pyc
+
+# Fingerprint device (WiFi credentials + device id live here, never commit)
+fingerprint-device/firmware/config.py
+__pycache__/
+.venv/
+.env.*
+!.env.example
