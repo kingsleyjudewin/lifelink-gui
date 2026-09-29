@@ -1,0 +1,7 @@
+{
+  "model": "VIS-IrisFormer",
+  "threshold": 0.84,
+  "eer": 0.00057,
+  "far_target": 0.001,
+  "calibrated_at": "2026-09-02T12:00:00Z"
+}

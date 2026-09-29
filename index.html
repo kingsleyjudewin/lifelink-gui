@@ -760,8 +760,14 @@ body {
             <div>FPS: 60.0 // GAIN: +3.2DB</div>
           </div>
 
-          <!-- Targeting Reticle -->
-          <div class="relative flex-1 flex items-center justify-center my-4">
+          <!-- Targeting Reticle (covered by the live camera preview while scanning) -->
+          <div class="relative flex-1 flex items-center justify-center my-4" style="min-height:280px;">
+              <div id="iris-live-preview-wrap" style="display:none; position:absolute; inset:0; background:#050505; border-radius:4px; overflow:hidden; z-index:5;">
+                <img id="iris-live-preview" alt="Live iris camera" style="width:100%; height:100%; object-fit:contain; display:block;">
+                <!-- Central 70% of the frame: the only area the iris engine uses -->
+                <div style="position:absolute; left:15%; top:15%; width:70%; height:70%; border:2px dashed #3A7A3A; border-radius:4px; pointer-events:none;"></div>
+                <div id="iris-live-preview-label" style="position:absolute; left:8px; top:8px; padding:2px 8px; background:rgba(0,0,0,0.75); color:#D9D9D9; font:11px monospace; border-radius:3px;">LIVE — PUT YOUR EYE INSIDE THE GREEN BOX</div>
+              </div>
             <!-- Center Reticle Graphic -->
             <div class="relative w-64 h-64 flex items-center justify-center">
               <svg class="absolute inset-0 w-full h-full text-[#747878] pointer-events-none" fill="none" viewBox="0 0 300 300">
@@ -844,6 +850,12 @@ body {
                 <span class="material-symbols-outlined text-[16px]">bolt</span>
                 <span>AUTO-CAPTURE BILATERAL IRIS (OD + OS)</span>
               </button>
+
+              <button onclick="LifeLinkBiometrics.skipIris()"
+                class="w-full py-2.5 btn-metallic-secondary text-xs font-mono flex items-center justify-center space-x-1 rounded">
+                <span class="material-symbols-outlined text-[16px]">skip_next</span>
+                <span>SKIP IRIS FOR NOW (ENROLL LATER)</span>
+              </button>
             </div>
           </div>
 
@@ -878,7 +890,7 @@ body {
         <div class="flex items-center space-x-3">
           <span id="photo-cam-status" class="inline-flex items-center px-2.5 py-1 rounded border border-[#D9D9D9] bg-white text-xs font-mono text-[#666666]">
             <span class="w-1.5 h-1.5 rounded-full bg-[#666666] mr-1.5"></span>
-            CAMERA INITIALIZING
+            PI ZERO CAMERA
           </span>
         </div>
       </div>
@@ -888,34 +900,31 @@ body {
         <div class="flex items-center justify-between text-xs font-mono text-[#AAAAAA] pb-2 border-b border-[#2A2A2A]">
           <div class="flex items-center space-x-2">
             <span class="w-2 h-2 rounded-full bg-[#3A7A3A] animate-pulse"></span>
-            <span>IDENTITY PHOTO VIEWPORT // FRONT-FACING CAMERA</span>
+            <span>IDENTITY PHOTO VIEWPORT // PI ZERO CAMERA</span>
           </div>
-          <div>1024 × 1024 CAPTURE</div>
+          <div>720 × 720 CAPTURE</div>
         </div>
 
         <!-- Live Preview / Captured Photo -->
         <div class="relative flex-1 flex items-center justify-center my-4">
           <div class="relative w-full max-w-sm aspect-square rounded-lg overflow-hidden bg-black border border-[#333333]">
-            <video id="photo-capture-video" class="w-full h-full object-cover" autoplay playsinline muted></video>
+            <!-- Live frames from the Pi Zero camera while a photo request runs -->
+            <div id="photo-live-preview-wrap" style="display:none; position:absolute; inset:0; background:#000;">
+              <img id="photo-live-preview" alt="Live camera" style="width:100%; height:100%; object-fit:cover; display:block;">
+              <div id="photo-live-preview-label" style="position:absolute; left:8px; bottom:8px; padding:2px 8px; background:rgba(0,0,0,0.75); color:#D9D9D9; font:11px monospace; border-radius:2px;"></div>
+            </div>
             <img id="photo-capture-preview" src="" alt="Captured patient photo" class="hidden w-full h-full object-cover absolute inset-0">
-            <canvas id="photo-capture-canvas" class="hidden"></canvas>
 
             <!-- Alignment guide, hidden once a photo is captured -->
             <div id="photo-capture-guide" class="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div class="w-2/3 h-2/3 border-2 border-dashed border-white/40 rounded-full"></div>
             </div>
 
-            <!-- Camera error / permission fallback -->
-            <div id="photo-capture-error" class="hidden absolute inset-0 flex flex-col items-center justify-center text-center px-6 bg-black/90">
-              <span class="material-symbols-outlined text-[36px] text-[#B58B00] mb-2">videocam_off</span>
-              <div class="text-sm font-semibold">Camera unavailable</div>
-              <p class="text-xs text-[#AAAAAA] mt-1" id="photo-capture-error-text">Grant camera permission to capture a patient photo, or skip this step.</p>
-            </div>
           </div>
         </div>
 
         <div class="flex items-center justify-between text-xs font-mono text-[#AAAAAA] pt-2 border-t border-[#2A2A2A]">
-          <div id="photo-capture-hint">ALIGN FACE WITHIN FRAME &amp; HOLD STILL</div>
+          <div id="photo-capture-hint">PRESS CAPTURE, THEN POWER ON THE CAMERA</div>
           <div class="text-[#3A7A3A] font-bold" id="photo-capture-state">AWAITING CAPTURE</div>
         </div>
       </div>
@@ -1466,12 +1475,20 @@ body {
             <div class="w-16 h-16 rounded-full bg-[#FAFAFA] border border-[#D9D9D9] flex items-center justify-center mx-auto mb-3">
               <span class="material-symbols-outlined text-[36px] text-[#1A1A1A]">visibility</span>
             </div>
-            <h3 class="text-lg font-bold text-[#1A1A1A] mb-1">Dual-NIR Iris Scan</h3>
+            <h3 class="text-lg font-bold text-[#1A1A1A] mb-1">Iris Scan</h3>
             <p class="text-xs text-[#666666] leading-relaxed mb-4">
-              Align ocular axis with infrared reticle at 30-35cm distance.
+              Select the claimed patient below, then have them look into the iris camera to confirm.
             </p>
+            <div style="position:relative; width:100%; aspect-ratio:16/9; margin-bottom:12px;" id="auth-iris-preview-box">
+              <div id="auth-iris-preview-wrap" style="display:none; position:absolute; inset:0; background:#050505; border-radius:4px; overflow:hidden; z-index:5;">
+                <img id="auth-iris-preview" alt="Live iris camera" style="width:100%; height:100%; object-fit:contain; display:block;">
+                <!-- Central 70% of the frame: the only area the iris engine uses -->
+                <div style="position:absolute; left:15%; top:15%; width:70%; height:70%; border:2px dashed #3A7A3A; border-radius:4px; pointer-events:none;"></div>
+                <div id="auth-iris-preview-label" style="position:absolute; left:8px; top:8px; padding:2px 8px; background:rgba(0,0,0,0.75); color:#D9D9D9; font:11px monospace; border-radius:3px;">LIVE — PUT YOUR EYE INSIDE THE GREEN BOX</div>
+              </div>
+            </div>
           </div>
-          <button onclick="LifeLinkBiometrics.simulateAuthenticate('Dual-NIR Iris Template', () => LifeLinkRouter.navigateTo('dashboard'))" 
+          <button onclick="LifeLinkBiometrics.verifyIrisReal(() => LifeLinkRouter.navigateTo('dashboard'))" 
             class="py-3.5 btn-metallic text-xs font-mono font-bold flex items-center justify-center space-x-2 rounded">
             <span class="material-symbols-outlined text-[16px]">camera</span>
             <span>SCAN IRIS [ENTER]</span>
@@ -2140,7 +2157,10 @@ const LifeLinkStore = (function () {
       capturedOD: false,
       capturedOS: false,
       scoreOD: 0,
-      scoreOS: 0
+      scoreOS: 0,
+      commandIdOD: null, // iris_enroll command ids; the backend links
+      commandIdOS: null, // their stored templates at commit
+      skipped: false     // operator chose "skip iris for now"
     },
     patientInfo: {
       fullName: '',
@@ -2346,14 +2366,9 @@ const LifeLinkStore = (function () {
         emergencyNotes: 'SEVERE SHELLFISH ANAPHYLAXIS. Avoid Morphine due to prior respiratory collapse. Keep epinephrine auto-injector accessible.'
       };
 
-      // Fingerprints are not prefilled: they must be captured on the real
-      // sensor, since only real templates can be stored and verified.
-
-      // Mark iris captured
-      currentDraft.iris.capturedOD = true;
-      currentDraft.iris.capturedOS = true;
-      currentDraft.iris.scoreOD = 98;
-      currentDraft.iris.scoreOS = 97;
+      // Fingerprints and iris are not prefilled: they must be captured on
+      // the real devices, since only real templates can be stored and
+      // verified.
 
       return currentDraft;
     },
@@ -2392,12 +2407,15 @@ window.LifeLinkStore = LifeLinkStore;
 const LifeLinkBiometrics = (function () {
   let isScanningFinger = false;
   let isCapturingIris = false;
+  let currentIrisCommandId = null;
 
   const DIGIT_ORDER = ['R1', 'R2', 'R3', 'R4', 'R5', 'L1', 'L2', 'L3', 'L4', 'L5'];
 
   // Real GT-521Fx2 sensor via the ESP32 relay in fingerprint-device/firmware
   // (see that folder's README). Must match the device's config.DEVICE_ID.
   const FP_DEVICE_ID = 'dev-esp32-1';
+  // Pi Zero iris camera (iris-module/camera-client); must match its --device-id.
+  const IRIS_DEVICE_ID = 'iris-cam-1';
 
   async function fpApiFetch(path, options) {
     const res = await fetch(`/api${path}`, {
@@ -2416,8 +2434,8 @@ const LifeLinkBiometrics = (function () {
     return res.json();
   }
 
-  function createDeviceCommand(mode, patientId, extra) {
-    return fpApiFetch(`/devices/${encodeURIComponent(FP_DEVICE_ID)}/commands`, {
+  function createDeviceCommand(mode, patientId, extra, deviceId = FP_DEVICE_ID) {
+    return fpApiFetch(`/devices/${encodeURIComponent(deviceId)}/commands`, {
       method: 'POST',
       body: JSON.stringify({ mode, ...(patientId ? { patient_id: patientId } : {}), ...(extra || {}) })
     });
@@ -2425,11 +2443,11 @@ const LifeLinkBiometrics = (function () {
 
   // onProgress receives the device's live step ({stage: 'place'|'lift', scan, of})
   // whenever it changes, while the command is still running.
-  async function pollDeviceCommand(commandId, { intervalMs = 700, timeoutMs = 45000, onProgress } = {}) {
+  async function pollDeviceCommand(commandId, { intervalMs = 700, timeoutMs = 45000, onProgress, deviceId = FP_DEVICE_ID } = {}) {
     const deadline = Date.now() + timeoutMs;
     let lastProgress = null;
     while (Date.now() < deadline) {
-      const command = await fpApiFetch(`/devices/${encodeURIComponent(FP_DEVICE_ID)}/commands/${encodeURIComponent(commandId)}`);
+      const command = await fpApiFetch(`/devices/${encodeURIComponent(deviceId)}/commands/${encodeURIComponent(commandId)}`);
       if (command.status === 'done' || command.status === 'error') return command;
       const progress = command.result && command.result.progress;
       if (onProgress && progress && JSON.stringify(progress) !== lastProgress) {
@@ -2438,7 +2456,76 @@ const LifeLinkBiometrics = (function () {
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
-    throw new Error('Timed out waiting for the fingerprint device to respond.');
+    throw new Error(deviceId === IRIS_DEVICE_ID
+      ? 'IRIS CAMERA DID NOT RESPOND — POWER ON THE PI ZERO (IT MUST BE ON THE PI 5 WI-FI) AND RETRY'
+      : 'Timed out waiting for the fingerprint device to respond.');
+  }
+
+  // Operator-facing text for the iris camera / engine error codes.
+  function describeIrisError(result) {
+    const code = result && result.error;
+    switch (code) {
+      case 'expired': return 'IRIS CAMERA DID NOT RESPOND IN TIME — POWER ON THE PI ZERO AND RETRY';
+      case 'superseded': return 'SCAN CANCELLED — A NEWER CAMERA REQUEST WAS STARTED';
+      case 'cancelled': return 'IRIS SCAN CANCELLED';
+      case 'no_iris_templates': return 'THIS PATIENT HAS NO ENROLLED IRIS — USE FINGERPRINT';
+      default: return code ? code.replace(/_/g, ' ').toUpperCase() : 'IRIS CAPTURE FAILED ON THE CAMERA';
+    }
+  }
+
+  // Live camera preview while an iris request runs: polls the backend for the
+  // camera's latest low-res frame. Between scans (camera stopped while the
+  // engine analyses) the last frame stays up, labelled accordingly.
+  let irisPreviewTimer = null;
+  let irisPreviewUrl = null;
+  function startIrisPreview(imgId, {
+    liveText = 'LIVE — PUT YOUR EYE INSIDE THE GREEN BOX',
+    heldText = 'ANALYSING THIS FRAME — HOLD POSITION'
+  } = {}) {
+    stopIrisPreview();
+    const img = document.getElementById(imgId);
+    const wrap = document.getElementById(`${imgId}-wrap`);
+    const label = document.getElementById(`${imgId}-label`);
+    let lastFrameAt = 0;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/devices/${encodeURIComponent(IRIS_DEVICE_ID)}/preview`, { cache: 'no-store' });
+        if (res.status === 200) {
+          const url = URL.createObjectURL(await res.blob());
+          if (img) img.src = url;
+          if (irisPreviewUrl) URL.revokeObjectURL(irisPreviewUrl);
+          irisPreviewUrl = url;
+          lastFrameAt = Date.now();
+          if (wrap) wrap.style.display = 'block';
+        }
+        if (label && lastFrameAt) {
+          label.textContent = Date.now() - lastFrameAt < 800 ? liveText : heldText;
+        }
+      } catch (e) { /* preview is best effort */ }
+    };
+    tick();
+    irisPreviewTimer = setInterval(tick, 250);
+  }
+  function stopIrisPreview() {
+    if (irisPreviewTimer) clearInterval(irisPreviewTimer);
+    irisPreviewTimer = null;
+    ['iris-live-preview', 'auth-iris-preview', 'photo-live-preview'].forEach((id) => {
+      const wrap = document.getElementById(`${id}-wrap`);
+      if (wrap) wrap.style.display = 'none';
+    });
+    if (irisPreviewUrl) URL.revokeObjectURL(irisPreviewUrl);
+    irisPreviewUrl = null;
+  }
+
+  // Live text for the Pi 5's progress on an iris request (the camera itself
+  // only sends frames; the backend records each attempt).
+  function describeIrisProgress({ stage, scan, reason }) {
+    switch (stage) {
+      case 'processing': return `ANALYSING IRIS (SCAN ${scan}) — KEEP LOOKING INTO THE CAMERA`;
+      case 'rescan': return `IRIS NOT CLEAR (${(reason || 'segmentation failed').toUpperCase()}) — CAMERA RESCANNING, HOLD STILL, EYE WIDE OPEN`;
+      case 'engine_unavailable': return 'IRIS ENGINE OFFLINE — START iris-module/engine/iris_service.py ON THE PI 5 (CAMERA WILL RESEND)';
+      default: return 'IRIS CAMERA WORKING...';
+    }
   }
 
   // Operator-facing text for the device's error codes.
@@ -2676,54 +2763,97 @@ const LifeLinkBiometrics = (function () {
     renderIrisView();
   }
 
-  function captureCurrentEye(callback) {
-    if (isCapturingIris) return;
+  // One eye per iris_enroll command. The engine stores the template
+  // (encrypted, unlinked) in the local Postgres; the draft only keeps the
+  // command id so the commit step can link it to the new patient.
+  async function captureCurrentEye(callback) {
+    if (isCapturingIris) return false;
     isCapturingIris = true;
 
     const draft = LifeLinkStore.getDraft();
     const eye = draft.iris.activeEye || 'OD';
+    const eyeName = eye === 'OD' ? 'RIGHT EYE' : 'LEFT EYE';
 
     const irisFeed = document.getElementById('iris-feed-view');
     const statusTxt = document.getElementById('iris-status-text');
-    const scoreVal = document.getElementById('iris-quality-score');
 
-    if (irisFeed) irisFeed.classList.add('ring-4', 'ring-[#3A7A3A]', 'transition-all');
-    if (statusTxt) statusTxt.textContent = 'LOCKING RETICLE & NIR STROBE ACTIVE...';
+    if (irisFeed) irisFeed.classList.add('ring-4', 'ring-[#B58B00]', 'transition-all');
+    if (statusTxt) statusTxt.textContent = `POWER ON THE IRIS CAMERA — ${eyeName}: LOOK STRAIGHT INTO IT, EYE WIDE OPEN`;
 
-    setTimeout(() => {
-      const score = Math.floor(97 + Math.random() * 3); // 97 - 99%
+    const showProgress = (progress) => {
+      if (statusTxt) statusTxt.textContent = describeIrisProgress(progress);
+    };
+
+    startIrisPreview('iris-live-preview');
+    try {
+      const command = await createDeviceCommand('iris_enroll', null,
+        { eye_side: eye === 'OD' ? 'right' : 'left' }, IRIS_DEVICE_ID);
+      currentIrisCommandId = command.id;
+      // Matches the backend's IRIS_COMMAND_TTL: covers the Pi Zero booting
+      // plus a few rescans.
+      const finished = await pollDeviceCommand(command.id,
+        { timeoutMs: 300000, onProgress: showProgress, deviceId: IRIS_DEVICE_ID });
+      if (finished.status !== 'done') throw new Error(describeIrisError(finished.result));
+
+      const score = Math.round((finished.result && finished.result.quality_score) || 0);
       if (eye === 'OD') {
         draft.iris.capturedOD = true;
         draft.iris.scoreOD = score;
-        draft.iris.activeEye = 'OS'; // auto advance to Left eye
+        draft.iris.commandIdOD = command.id;
+        if (!draft.iris.capturedOS) draft.iris.activeEye = 'OS'; // auto advance to Left eye
       } else {
         draft.iris.capturedOS = true;
         draft.iris.scoreOS = score;
+        draft.iris.commandIdOS = command.id;
       }
-
+      draft.iris.skipped = false;
       LifeLinkStore.updateDraft('iris', draft.iris);
-      LifeLinkStore.logAuditEvent('IRIS_CAPTURED', `NIR Bilateral Iris captured for ${eye === 'OD' ? 'Oculus Dexter (Right)' : 'Oculus Sinister (Left)'}: Score ${score}% ISO 19794-6`);
-
-      if (irisFeed) irisFeed.classList.remove('ring-4', 'ring-[#3A7A3A]');
-      if (statusTxt) statusTxt.textContent = 'BILATERAL SCAN LOCKED // ISO 19794-6 VERIFIED';
-      if (scoreVal) scoreVal.textContent = `${score}% (GRADE A)`;
+      LifeLinkStore.logAuditEvent('IRIS_CAPTURED', `Iris template extracted for ${eye === 'OD' ? 'Oculus Dexter (Right)' : 'Oculus Sinister (Left)'}: quality ${score}%; held unlinked until the patient is committed.`);
 
       isCapturingIris = false;
       renderIrisView();
-
+      if (statusTxt) statusTxt.textContent = `${eyeName} CAPTURED` +
+        (draft.iris.capturedOD && draft.iris.capturedOS ? ' — BOTH EYES COMPLETE' : ' — NEXT: LEFT EYE');
       if (callback) callback();
-    }, 900);
+      return true;
+    } catch (err) {
+      isCapturingIris = false;
+      renderIrisView();
+      if (statusTxt) statusTxt.textContent = err.message;
+      return false;
+    } finally {
+      currentIrisCommandId = null;
+      stopIrisPreview();
+      if (irisFeed) irisFeed.classList.remove('ring-4', 'ring-[#B58B00]');
+    }
   }
 
-  function autoScanBothEyes(callback) {
+  // Register without iris: cancels a running scan (so the camera stops) and
+  // marks the draft; the patient is committed with fingerprints only and can
+  // be identified by fingerprint. No iris data is uploaded.
+  async function skipIris() {
+    if (currentIrisCommandId) {
+      try {
+        await fpApiFetch(`/devices/${encodeURIComponent(IRIS_DEVICE_ID)}/commands/${currentIrisCommandId}/cancel`,
+          { method: 'POST' });
+      } catch (e) { /* the scan also expires on its own */ }
+    }
     const draft = LifeLinkStore.getDraft();
-    draft.iris.capturedOD = true;
-    draft.iris.capturedOS = true;
-    draft.iris.scoreOD = 98;
-    draft.iris.scoreOS = 99;
+    draft.iris.skipped = true;
     LifeLinkStore.updateDraft('iris', draft.iris);
-    LifeLinkStore.logAuditEvent('IRIS_BULK', 'Dual-ocular iris enrollment automatically validated.');
-    renderIrisView();
+    LifeLinkStore.logAuditEvent('IRIS_SKIPPED', 'Iris enrollment skipped by operator; patient will be registered without iris.');
+    LifeLinkRouter.navigateTo('photo-capture');
+  }
+
+  async function autoScanBothEyes(callback) {
+    const draft = LifeLinkStore.getDraft();
+    for (const eye of ['OD', 'OS']) {
+      if (draft.iris[`captured${eye}`]) continue;
+      draft.iris.activeEye = eye;
+      LifeLinkStore.updateDraft('iris', draft.iris);
+      renderIrisView();
+      if (!(await captureCurrentEye())) return;
+    }
     if (callback) callback();
   }
 
@@ -2864,6 +2994,83 @@ const LifeLinkBiometrics = (function () {
     }
   }
 
+  // EXISTING PATIENT AUTHENTICATION, iris (Page 8) — 1:1 against the
+  // claimed active patient's stored iris templates, same flow as
+  // verifyFingerprintReal. The engine compares against both stored eyes.
+  async function verifyIrisReal(onMatch) {
+    const statusBox = document.getElementById('auth-status-container');
+    const statusText = document.getElementById('auth-status-text');
+    const progressSweep = document.getElementById('auth-progress-sweep');
+    const fail = (html) => {
+      if (statusBox) statusBox.className = 'p-4 rounded border border-[#A12A2A] bg-[#A12A2A]/10 flex items-center justify-between';
+      if (statusText) statusText.innerHTML = html;
+    };
+
+    const patient = LifeLinkStore.getActivePatient();
+    if (!patient) {
+      fail(`<span class="font-bold text-[#A12A2A]">NO ACTIVE PATIENT TO MATCH AGAINST.</span> Select a patient from the archive below.`);
+      return;
+    }
+
+    if (statusBox) statusBox.className = 'p-4 rounded border border-[#B58B00] bg-[#B58B00]/5 flex items-center justify-between';
+    if (statusText) statusText.textContent = 'POWER ON THE IRIS CAMERA — PATIENT LOOKS STRAIGHT INTO IT, EYE WIDE OPEN...';
+    if (progressSweep) progressSweep.style.width = '35%';
+
+    startIrisPreview('auth-iris-preview');
+    try {
+      const command = await createDeviceCommand('iris_verify', patient.id, null, IRIS_DEVICE_ID);
+      if (progressSweep) progressSweep.style.width = '70%';
+      const finished = await pollDeviceCommand(command.id, {
+        timeoutMs: 300000,
+        deviceId: IRIS_DEVICE_ID,
+        onProgress: (progress) => {
+          if (statusText) statusText.textContent = describeIrisProgress(progress);
+        }
+      });
+      if (finished.status !== 'done') throw new Error(describeIrisError(finished.result));
+      if (progressSweep) progressSweep.style.width = '100%';
+
+      const r = finished.result || {};
+      const pct = r.similarity != null ? ` · SIMILARITY ${(r.similarity * 100).toFixed(1)}%` : '';
+      if (!r.match) {
+        fail(`<span class="font-bold text-[#A12A2A]">NO MATCH.</span> Scanned iris does not match PID: ${patient.id} (${patient.fullName})${pct}.`);
+        LifeLinkStore.logAuditEvent('BIOMETRIC_AUTH_FAILED', `Iris scan did not match claimed PID: ${patient.id} (${patient.fullName})${pct}`);
+        return;
+      }
+
+      const eyeName = r.eye_side === 'right' ? ' · RIGHT EYE (OD)' : r.eye_side === 'left' ? ' · LEFT EYE (OS)' : '';
+      if (statusBox) statusBox.className = 'p-4 rounded border border-[#3A7A3A] bg-[#3A7A3A]/10 flex items-center justify-between';
+      if (statusText) statusText.innerHTML = `<span class="font-bold text-[#3A7A3A]">AUTHENTICATION CONFIRMED:</span> PID: ${patient.id} (${patient.fullName})${eyeName}${pct}`;
+      LifeLinkStore.logAuditEvent('BIOMETRIC_AUTH_SUCCESS', `Iris verify confirmed for ${patient.fullName} (${patient.id})${pct}`);
+
+      setTimeout(() => {
+        if (onMatch) onMatch(patient);
+      }, 400);
+    } catch (err) {
+      fail(`<span class="font-bold text-[#A12A2A]">SCAN ERROR:</span> ${err.message}`);
+    } finally {
+      stopIrisPreview();
+    }
+  }
+
+  // Links the two captured eyes to a just-created patient (one transaction).
+  function submitIrisTemplates(patientId) {
+    const { commandIdOD, commandIdOS } = LifeLinkStore.getDraft().iris;
+    return fpApiFetch(`/patients/${encodeURIComponent(patientId)}/iris-templates`, {
+      method: 'POST',
+      body: JSON.stringify({ command_ids: [commandIdOD, commandIdOS] })
+    });
+  }
+
+  function irisSkipped() {
+    return Boolean(LifeLinkStore.getDraft().iris.skipped);
+  }
+
+  function irisCaptured() {
+    const iris = LifeLinkStore.getDraft().iris;
+    return Boolean(iris.capturedOD && iris.capturedOS && iris.commandIdOD && iris.commandIdOS);
+  }
+
   // Stores every captured template for a just-created patient in one
   // local-Postgres transaction (all or nothing).
   function submitEnrolledTemplates(patientId, templates) {
@@ -2891,9 +3098,23 @@ const LifeLinkBiometrics = (function () {
     captureCurrentEye,
     autoScanBothEyes,
     renderIrisView,
+    submitIrisTemplates,
+    irisCaptured,
+    irisSkipped,
+    skipIris,
 
     simulateAuthenticate,
-    verifyFingerprintReal
+    verifyFingerprintReal,
+    verifyIrisReal,
+
+    // Shared with the photo step, which uses the same Pi Zero camera.
+    IRIS_DEVICE_ID,
+    fpApiFetch,
+    createDeviceCommand,
+    pollDeviceCommand,
+    describeIrisError,
+    startIrisPreview,
+    stopIrisPreview
   };
 })();
 
@@ -2903,21 +3124,22 @@ window.LifeLinkBiometrics = LifeLinkBiometrics;
   <script>
 /**
  * LifeLink Patient Photo Capture
- * Webcam-driven identity photo capture for the registration workflow
- * (Enrollment Step 03, between iris capture and patient information).
+ * Identity photo for the registration workflow (Enrollment Step 03,
+ * between iris capture and patient information), taken with the same Pi
+ * Zero camera as the iris scans: the GUI queues a photo_capture request,
+ * the operator powers the camera on, it sends one sharp square frame and
+ * shuts down. The photo is staged in the draft and uploaded on commit.
  */
 
 const LifeLinkPhoto = (function () {
-  let mediaStream = null;
+  let currentCommandId = null;
+  let capturing = false;
 
   function els() {
     return {
-      video: document.getElementById('photo-capture-video'),
+      liveWrap: document.getElementById('photo-live-preview-wrap'),
       preview: document.getElementById('photo-capture-preview'),
-      canvas: document.getElementById('photo-capture-canvas'),
       guide: document.getElementById('photo-capture-guide'),
-      errorBox: document.getElementById('photo-capture-error'),
-      errorText: document.getElementById('photo-capture-error-text'),
       statusPill: document.getElementById('photo-cam-status'),
       hint: document.getElementById('photo-capture-hint'),
       state: document.getElementById('photo-capture-state'),
@@ -2934,103 +3156,108 @@ const LifeLinkPhoto = (function () {
     statusPill.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${colorClass.includes('3A7A3A') ? 'bg-[#3A7A3A] animate-pulse' : colorClass.includes('A12A2A') ? 'bg-[#A12A2A]' : 'bg-[#666666]'} mr-1.5"></span>${text}`;
   }
 
-  async function startCamera() {
-    const { video, errorBox } = els();
-    if (!video) return;
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showCameraError('This browser cannot access a camera. Use "Skip for now" and add a photo later.');
-      return;
-    }
-
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1024 }, height: { ideal: 1024 } },
-        audio: false
-      });
-      video.srcObject = mediaStream;
-      if (errorBox) errorBox.classList.add('hidden');
-      setStatusPill('CAMERA LIVE', 'border-[#3A7A3A] bg-[#3A7A3A]/10 text-[#3A7A3A]');
-    } catch (err) {
-      console.warn('Camera access failed:', err);
-      showCameraError(
-        err && err.name === 'NotAllowedError'
-          ? 'Camera permission was denied. Allow camera access, or use "Skip for now".'
-          : 'No camera detected on this terminal. Use "Skip for now" and add a photo later.'
-      );
-    }
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
   }
 
-  function showCameraError(message) {
-    const { errorBox, errorText, btnCapture } = els();
-    if (errorBox) errorBox.classList.remove('hidden');
-    if (errorText) errorText.textContent = message;
-    if (btnCapture) btnCapture.disabled = true;
-    setStatusPill('CAMERA UNAVAILABLE', 'border-[#A12A2A] bg-[#A12A2A]/10 text-[#A12A2A]');
-  }
-
-  function stopCamera() {
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      mediaStream = null;
-    }
-    const { video } = els();
-    if (video) video.srcObject = null;
-  }
-
-  function capturePhoto() {
-    const { video, canvas, preview, guide, hint, state, btnCapture, btnRetake, btnNext } = els();
-    if (!video || !canvas || !video.videoWidth) return;
-
-    const size = Math.min(video.videoWidth, video.videoHeight);
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    const sx = (video.videoWidth - size) / 2;
-    const sy = (video.videoHeight - size) / 2;
-    ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-    LifeLinkStore.setDraftPhoto(dataUrl);
-    LifeLinkStore.logAuditEvent('PHOTO_CAPTURED', 'Patient identity photo captured via front-facing camera during enrollment.');
-
+  function showStaged(dataUrl) {
+    const { preview, guide, hint, state, btnCapture, btnRetake, btnNext } = els();
     if (preview) {
       preview.src = dataUrl;
       preview.classList.remove('hidden');
     }
-    if (video) video.classList.add('hidden');
     if (guide) guide.classList.add('hidden');
     if (hint) hint.textContent = 'PHOTO CAPTURED & STAGED FOR ENCLAVE COMMIT';
     if (state) state.textContent = 'CAPTURED';
     if (btnCapture) btnCapture.classList.add('hidden');
     if (btnRetake) btnRetake.classList.remove('hidden');
     if (btnNext) btnNext.disabled = false;
-
-    // Release the camera once we have the still frame — no need to keep streaming.
-    stopCamera();
     setStatusPill('PHOTO STAGED', 'border-[#3A7A3A] bg-[#3A7A3A]/10 text-[#3A7A3A]');
   }
 
-  function retakePhoto() {
-    const { video, preview, guide, hint, state, btnCapture, btnRetake, btnNext } = els();
-    LifeLinkStore.setDraftPhoto('');
-
+  function showIdle(message) {
+    const { preview, guide, hint, state, btnCapture, btnRetake, btnNext } = els();
     if (preview) {
       preview.classList.add('hidden');
       preview.src = '';
     }
-    if (video) video.classList.remove('hidden');
     if (guide) guide.classList.remove('hidden');
-    if (hint) hint.textContent = 'ALIGN FACE WITHIN FRAME & HOLD STILL';
-    if (state) state.textContent = 'AWAITING CAPTURE';
+    if (hint) hint.textContent = message || 'PRESS CAPTURE, THEN POWER ON THE CAMERA';
+    if (state) state.textContent = message ? 'NOT CAPTURED' : 'AWAITING CAPTURE';
     if (btnCapture) {
       btnCapture.classList.remove('hidden');
       btnCapture.disabled = false;
     }
     if (btnRetake) btnRetake.classList.add('hidden');
     if (btnNext) btnNext.disabled = true;
+    setStatusPill(message ? 'CAPTURE FAILED' : 'PI ZERO CAMERA',
+      message ? 'border-[#A12A2A] bg-[#A12A2A]/10 text-[#A12A2A]' : 'border-[#D9D9D9] bg-white text-[#666666]');
+  }
 
-    startCamera();
+  async function capturePhoto() {
+    if (capturing) return;
+    capturing = true;
+    const bio = LifeLinkBiometrics;
+    const { hint, state, btnCapture } = els();
+    showIdle();
+    if (btnCapture) btnCapture.disabled = true;
+    if (hint) hint.textContent = 'POWER ON THE CAMERA — PATIENT FACES IT, ABOUT 50 CM AWAY, HOLD STILL';
+    if (state) state.textContent = 'WAITING FOR CAMERA';
+    setStatusPill('WAITING FOR CAMERA', 'border-[#B58B00] bg-[#B58B00]/10 text-[#B58B00]');
+
+    bio.startIrisPreview('photo-live-preview', {
+      liveText: 'LIVE — CENTRE THE FACE IN THE CIRCLE',
+      heldText: 'PHOTO TAKEN — SENDING'
+    });
+    let commandId = null;
+    try {
+      const command = await bio.createDeviceCommand('photo_capture', null, null, bio.IRIS_DEVICE_ID);
+      commandId = currentCommandId = command.id;
+      // Same window as the iris scans: covers the Pi Zero booting.
+      const finished = await bio.pollDeviceCommand(command.id, { timeoutMs: 300000, deviceId: bio.IRIS_DEVICE_ID });
+      if (finished.status !== 'done') throw new Error(bio.describeIrisError(finished.result));
+
+      const res = await fetch(`/api/devices/${encodeURIComponent(bio.IRIS_DEVICE_ID)}/commands/${command.id}/photo`,
+        { cache: 'no-store' });
+      if (!res.ok) throw new Error('PHOTO WAS NOT RECEIVED — PRESS CAPTURE TO TRY AGAIN');
+      const dataUrl = await blobToDataUrl(await res.blob());
+
+      LifeLinkStore.setDraftPhoto(dataUrl);
+      LifeLinkStore.logAuditEvent('PHOTO_CAPTURED', 'Patient identity photo captured with the Pi Zero camera during enrollment.');
+      showStaged(dataUrl);
+    } catch (err) {
+      // A cancelled request (operator left the page) needs no message.
+      if (currentCommandId === commandId) showIdle(err.message);
+    } finally {
+      if (currentCommandId === commandId) {
+        currentCommandId = null;
+        bio.stopIrisPreview();
+      }
+      capturing = false;
+    }
+  }
+
+  // Ends a running photo request so the camera doesn't take a photo nobody
+  // is waiting for. Called whenever the operator leaves this page.
+  function stopCamera() {
+    const commandId = currentCommandId;
+    if (!commandId) return;
+    currentCommandId = null;
+    LifeLinkBiometrics.stopIrisPreview();
+    LifeLinkBiometrics.fpApiFetch(
+      `/devices/${encodeURIComponent(LifeLinkBiometrics.IRIS_DEVICE_ID)}/commands/${commandId}/cancel`,
+      { method: 'POST' }
+    ).catch(() => { /* the request also expires on its own */ });
+  }
+
+  function retakePhoto() {
+    LifeLinkStore.setDraftPhoto('');
+    capturePhoto();
   }
 
   function skipPhotoCapture() {
@@ -3040,39 +3267,11 @@ const LifeLinkPhoto = (function () {
 
   function renderPhotoCaptureView() {
     const draft = LifeLinkStore.getDraft();
-    const { video, preview, guide, hint, state, btnCapture, btnRetake, btnNext, errorBox } = els();
-
-    if (errorBox) errorBox.classList.add('hidden');
-    if (btnCapture) btnCapture.disabled = false;
-
     if (draft.photoUrl) {
       // Already captured (e.g. navigated back) — show the staged photo.
-      if (preview) {
-        preview.src = draft.photoUrl;
-        preview.classList.remove('hidden');
-      }
-      if (video) video.classList.add('hidden');
-      if (guide) guide.classList.add('hidden');
-      if (hint) hint.textContent = 'PHOTO CAPTURED & STAGED FOR ENCLAVE COMMIT';
-      if (state) state.textContent = 'CAPTURED';
-      if (btnCapture) btnCapture.classList.add('hidden');
-      if (btnRetake) btnRetake.classList.remove('hidden');
-      if (btnNext) btnNext.disabled = false;
-      setStatusPill('PHOTO STAGED', 'border-[#3A7A3A] bg-[#3A7A3A]/10 text-[#3A7A3A]');
-    } else {
-      if (preview) {
-        preview.classList.add('hidden');
-        preview.src = '';
-      }
-      if (video) video.classList.remove('hidden');
-      if (guide) guide.classList.remove('hidden');
-      if (hint) hint.textContent = 'ALIGN FACE WITHIN FRAME & HOLD STILL';
-      if (state) state.textContent = 'AWAITING CAPTURE';
-      if (btnCapture) btnCapture.classList.remove('hidden');
-      if (btnRetake) btnRetake.classList.add('hidden');
-      if (btnNext) btnNext.disabled = true;
-      setStatusPill('CAMERA INITIALIZING', 'border-[#D9D9D9] bg-white text-[#666666]');
-      startCamera();
+      showStaged(draft.photoUrl);
+    } else if (!capturing) {
+      showIdle();
     }
   }
 
@@ -4612,9 +4811,11 @@ window.renderReviewCreateChecklist = function () {
     ? '<span class="text-[#3A7A3A] font-bold">✓ 10/10 Captured (500 DPI)</span>' 
     : `<span class="text-[#B58B00] font-bold">⚠ ${fpCount}/10 Captured</span>`;
 
-  if (cIris) cIris.innerHTML = irisDone 
-    ? '<span class="text-[#3A7A3A] font-bold">✓ Bilateral Iris Captured (OD &amp; OS)</span>' 
-    : '<span class="text-[#B58B00] font-bold">⚠ Awaiting Dual Iris Capture</span>';
+  if (cIris) cIris.innerHTML = irisDone
+    ? '<span class="text-[#3A7A3A] font-bold">✓ Bilateral Iris Captured (OD &amp; OS)</span>'
+    : draft.iris.skipped
+      ? '<span class="text-[#666666] font-bold">— Skipped (enroll later)</span>'
+      : '<span class="text-[#B58B00] font-bold">⚠ Awaiting Dual Iris Capture</span>';
 
   if (cInfo) cInfo.innerHTML = infoDone 
     ? `<span class="text-[#3A7A3A] font-bold">✓ Personal Info Complete (${draft.patientInfo.fullName})</span>` 
@@ -4646,6 +4847,13 @@ window.executeCreatePatientProfile = function () {
     return;
   }
 
+  const withIris = LifeLinkBiometrics.irisCaptured();
+  if (!withIris && !LifeLinkBiometrics.irisSkipped()) {
+    alert('Capture both irises (right and left) on the iris camera, or choose "SKIP IRIS FOR NOW", before committing.');
+    LifeLinkRouter.navigateTo('iris-enroll');
+    return;
+  }
+
   const modal = document.getElementById('commit-progress-modal');
   if (modal) modal.classList.remove('hidden');
 
@@ -4670,11 +4878,10 @@ window.executeCreatePatientProfile = function () {
       clearInterval(interval);
       setTimeout(async () => {
         try {
-          // Commit patient to the backend. Iris capture stays a pure
-          // frontend simulation (no iris hardware) — only the photo (as a
-          // base64 data URL), demographics, and medical anamnesis are sent
-          // here. Real captured fingerprint templates are linked below,
-          // once this call gives us a real patient_id to link them to.
+          // Commit patient to the backend: photo (as a base64 data URL),
+          // demographics, and medical anamnesis. Captured fingerprint and
+          // iris templates are linked below, once this call gives us a real
+          // patient_id to link them to.
           const created = await LifeLinkStore.saveNewPatient({
             ...draft.patientInfo,
             photoDataUrl: draft.photoUrl,
@@ -4698,14 +4905,35 @@ window.executeCreatePatientProfile = function () {
             }
           }
 
+          let irisError = null;
+          for (let attempt = 0; withIris && attempt < 2; attempt++) {
+            try {
+              await LifeLinkBiometrics.submitIrisTemplates(created.id);
+              irisError = null;
+              break;
+            } catch (err) {
+              irisError = err;
+            }
+          }
+          if (!withIris) {
+            LifeLinkStore.logAuditEvent('IRIS_SKIPPED', `Patient ${created.id} registered without iris (skipped)`);
+          } else if (irisError) {
+            LifeLinkStore.logAuditEvent('IRIS_STORE_FAILED', `Patient ${created.id} created but iris templates were not linked: ${irisError.message}`);
+          } else {
+            LifeLinkStore.logAuditEvent('IRIS_TEMPLATES_STORED', `Bilateral iris templates linked in local Postgres for ${created.id}`);
+          }
+
           if (modal) modal.classList.add('hidden');
           LifeLinkStore.resetDraft();
+          if (irisError) {
+            alert(`⚠ IRIS TEMPLATES WERE NOT STORED for ${created.id}\nReason: ${irisError.message}\nThis patient cannot be identified by iris until re-enrolled.`);
+          }
           if (storeError) {
             LifeLinkStore.logAuditEvent('FINGERPRINT_STORE_FAILED', `Patient ${created.id} created but fingerprint templates were not stored: ${storeError.message}`);
             alert(`⚠ PROFILE CREATED BUT FINGERPRINTS WERE NOT STORED\nPatient ID: ${created.id}\nReason: ${storeError.message}\nThis patient cannot be identified by fingerprint until re-enrolled.`);
           } else {
             LifeLinkStore.logAuditEvent('FINGERPRINT_TEMPLATES_STORED', `10 fingerprint templates stored in local Postgres for ${created.id}`);
-            alert(`✓ PROFILE SUCCESSFULLY CREATED!\nAssigned Unique Patient ID: ${created.id}\nPatient: ${created.fullName}\n10 fingerprint templates stored in the local database.`);
+            alert(`✓ PROFILE SUCCESSFULLY CREATED!\nAssigned Unique Patient ID: ${created.id}\nPatient: ${created.fullName}\n10 fingerprint templates stored in the local database.${!withIris ? '\nIris: skipped (not enrolled) — identify by fingerprint.' : irisError ? '' : '\nBilateral iris templates stored in the local database.'}`);
           }
           LifeLinkRouter.navigateTo('dashboard');
         } catch (err) {

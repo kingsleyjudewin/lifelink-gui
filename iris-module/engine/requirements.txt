@@ -1,0 +1,12 @@
+# Install torch/torchvision from the CPU index first (Pi 5 / laptop, no CUDA needed):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.1
+torchvision>=0.16
+numpy
+opencv-python-headless
+pyyaml
+fastapi
+uvicorn
+timm
+einops
+scipy

@@ -14,3 +14,7 @@ __pycache__/
 .venv/
 .env.*
 !.env.example
+
+# Iris engine: 453 MB checkpoint is fetched by iris-module/engine/download_models.sh
+iris-module/engine/models/sota.pth
+iris-module/engine/models/*.part

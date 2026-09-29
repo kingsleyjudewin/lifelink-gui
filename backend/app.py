@@ -8,36 +8,43 @@ existing-patient lookup ("identify"), and the full medical records
 repository. Also relays real fingerprint enroll/verify commands to the
 GT-521Fx2 sensor via the ESP32 in ../fingerprint-device/firmware (see the
 "fingerprint device" section below) — the backend never runs the biometric
-comparison itself, only the device does. Iris capture stays a pure
-frontend simulation (no iris hardware exists) — see LifeLinkBiometrics in
-index.html.
+comparison itself, only the device does. Iris enroll/verify go through the
+Pi Zero camera (../iris-module/camera-client, via /health + /capture) and
+the local iris engine service in ../iris-module/engine (see the "iris"
+section below).
 
 Two databases: patient/medical data lives in Supabase (backend/schema.sql);
-fingerprint template bytes live in a local Postgres on this machine
-(fingerprint-device/db/schema.sql, LOCAL_DB_* in backend/.env) and never
-touch Supabase.
+fingerprint and iris template bytes live in a local Postgres on this
+machine (fingerprint-device/db/schema.sql + iris-module/db/schema.sql,
+LOCAL_DB_* in backend/.env) and never touch Supabase.
 
 Run once first:
   - apply backend/schema.sql in the Supabase SQL Editor
-  - apply fingerprint-device/db/schema.sql to your local `lifelink` database
+  - apply fingerprint-device/db/schema.sql, then iris-module/db/schema.sql,
+    to your local `lifelink` database
+  - start the iris engine: iris-module/engine/.venv/bin/python iris-module/engine/iris_service.py
 Then:  backend/.venv/bin/python backend/app.py
 Open:  http://localhost:3000
 """
 
 import base64
 import binascii
+import hashlib
+import json
 import os
 import random
 import re
 import string
+import time
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
+from urllib import error as urlerror, request as urlrequest
 
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory, abort
+from flask import Flask, Response, jsonify, request, send_from_directory, abort
 from flask_cors import CORS
 from supabase import create_client
 
@@ -51,6 +58,7 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SECRET_KEY = os.environ["SUPABASE_SECRET_KEY"]
 PORT = int(os.environ.get("BACKEND_PORT", 3000))
 TEMPLATE_ENCRYPTION_KEY = os.environ["TEMPLATE_ENCRYPTION_KEY"]
+IRIS_ENGINE_URL = os.environ.get("IRIS_ENGINE_URL", "http://127.0.0.1:8010").rstrip("/")
 
 LOCAL_DB_CONFIG = {
     "host": os.environ.get("LOCAL_DB_HOST", "localhost"),
@@ -83,7 +91,10 @@ RECORD_CATEGORIES = {
     "Surgeries", "Vaccinations", "Scans", "Discharge Summaries",
 }
 ALLERGY_CATEGORIES = {"drug", "food", "environmental"}
-DEVICE_COMMAND_MODES = {"enroll", "verify"}
+DEVICE_COMMAND_MODES = {"enroll", "verify", "iris_enroll", "iris_verify", "photo_capture"}
+# Requests served by the Pi Zero camera: iris scans and the patient photo.
+CAMERA_MODES = ("iris_enroll", "iris_verify", "photo_capture")
+IRIS_EYE_SIDES = {"left", "right"}
 
 
 # ---------------------------------------------------------------- helpers --
@@ -97,6 +108,7 @@ class ApiError(Exception):
 
 @app.errorhandler(ApiError)
 def handle_api_error(err):
+    app.logger.warning("%s %s -> %s: %s", request.method, request.path, err.status, err.message)
     return jsonify({"error": err.message}), err.status
 
 
@@ -629,10 +641,19 @@ def create_device_command(device_id):
 
     patient_id = body.get("patient_id")
     params = None
-    if mode == "verify":
+    if mode in ("verify", "iris_verify"):
         if not patient_id:
-            raise ApiError("patient_id is required for verify commands", 400)
+            raise ApiError(f"patient_id is required for {mode} commands", 400)
         get_patient_row_by_lifelink_id(patient_id)
+        if mode == "iris_verify" and not patient_has_iris_templates(patient_id):
+            raise ApiError("This patient has no enrolled iris templates", 409)
+    elif mode == "iris_enroll":
+        eye_side = body.get("eye_side")
+        if eye_side not in IRIS_EYE_SIDES:
+            raise ApiError("eye_side must be 'left' or 'right'", 400)
+        params = {"eye_side": eye_side}
+    elif mode == "photo_capture":
+        pass
     else:
         # Fingers already captured earlier in this registration, so the
         # device can refuse the same finger being enrolled twice.
@@ -648,13 +669,16 @@ def create_device_command(device_id):
         ]}
 
     with local_db_cursor() as cur:
+        if mode in CAMERA_MODES:
+            close_active_iris_commands(cur, device_id, "superseded", only_expired=False)
         cur.execute(
             """
             INSERT INTO device_commands (device_id, mode, patient_id, status, params)
             VALUES (%s, %s, %s, 'pending', %s)
             RETURNING id, device_id, mode, patient_id, status, result, created_at, updated_at
             """,
-            (device_id, mode, patient_id if mode == "verify" else None, psycopg2.extras.Json(params)),
+            (device_id, mode, patient_id if mode in ("verify", "iris_verify") else None,
+             psycopg2.extras.Json(params)),
         )
         row = cur.fetchone()
     return jsonify(dict(row)), 201
@@ -727,6 +751,22 @@ def post_device_command_result(device_id, command_id):
     if not row:
         raise ApiError("Command not found", 404)
     return jsonify(dict(row))
+
+
+@app.route("/api/devices/<device_id>/commands/<int:command_id>/cancel", methods=["POST"])
+def cancel_device_command(device_id, command_id):
+    """The GUI gave up on a command (e.g. "skip iris for now"). Ends it if
+    still open, so the camera stops scanning for it."""
+    with local_db_cursor() as cur:
+        cur.execute(
+            """
+            UPDATE device_commands
+            SET status = 'error', result = %s, updated_at = now()
+            WHERE id = %s AND device_id = %s AND status IN ('pending', 'in_progress')
+            """,
+            (psycopg2.extras.Json({"error": "cancelled"}), command_id, device_id),
+        )
+    return "", 204
 
 
 @app.route("/api/devices/<device_id>/commands/<int:command_id>/progress", methods=["POST"])
@@ -882,6 +922,345 @@ def verify_fingerprint():
         "confidence": body.get("confidence", 1.0),
         "finger_position": body.get("finger_position"),
     })
+
+
+# ------------------------------------------------------------------- iris --
+# Pi 5 <-> Pi Zero camera protocol (see iris-module/README.md). The Pi Zero
+# boots, finds this server (main-pi.local), and asks GET /health until it
+# says ready — which it does only while the GUI has an active iris request
+# (an iris_enroll / iris_verify device command) for that camera. It then
+# scans, stops the camera, and POSTs its best frame to /capture:
+#
+#   SUCCESS -> processed (or nothing left to do); the Pi Zero shuts down
+#   RESCAN  -> the engine rejected the frame; the Pi Zero scans again
+#   RETRY   -> checksum mismatch / engine unreachable; resend the same frame
+#
+# Each answer is recorded against the frame's capture_id, so a resent
+# capture gets the same answer instead of being processed twice. The frame
+# goes to the local iris engine (../iris-module/engine/iris_service.py,
+# IRIS_ENGINE_URL) and is never written to disk.
+#
+# Templates are stored encrypted in the local Postgres like fingerprints.
+# An enroll template is stored as soon as it is extracted, unlinked
+# (patient_id NULL); the commit step links it via
+# POST /api/patients/<id>/iris-templates. The browser never receives
+# template bytes.
+
+MAX_IRIS_IMAGE_B64 = 7 * 1024 * 1024  # ~5 MB decoded
+UNLINKED_IRIS_TTL = "1 day"
+# Covers powering on the Pi Zero (it boots per scan) plus a few rescans;
+# the frontend polls for the same length of time.
+IRIS_COMMAND_TTL = "5 minutes"
+
+class IrisEngineUnavailable(Exception):
+    pass
+
+
+def call_iris_engine(path, payload, timeout=30):
+    """POSTs JSON to the iris engine. Returns (http_status, body). Raises
+    IrisEngineUnavailable if the engine can't be reached."""
+    req = urlrequest.Request(
+        f"{IRIS_ENGINE_URL}{path}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read())
+    except urlerror.HTTPError as err:
+        try:
+            body = json.loads(err.read())
+        except ValueError:
+            body = {}
+        # FastAPI wraps HTTPException details in {"detail": ...}.
+        return err.code, body.get("detail", body)
+    except (urlerror.URLError, TimeoutError, ConnectionError) as err:
+        raise IrisEngineUnavailable(str(err))
+
+
+def patient_has_iris_templates(lifelink_id):
+    with local_db_cursor() as cur:
+        cur.execute("SELECT 1 FROM iris_templates WHERE patient_id = %s LIMIT 1", (lifelink_id,))
+        return cur.fetchone() is not None
+
+
+def close_active_iris_commands(cur, device_id, error, only_expired):
+    """Ends open iris requests for a camera: the expired ones, or (when the
+    GUI starts a new request) all of them."""
+    cur.execute(
+        f"""
+        UPDATE device_commands
+        SET status = 'error', result = %s, updated_at = now()
+        WHERE device_id = %s AND mode IN %s AND status IN ('pending', 'in_progress')
+          {"AND created_at < now() - interval '" + IRIS_COMMAND_TTL + "'" if only_expired else ""}
+        """,
+        (psycopg2.extras.Json({"error": error}), device_id, CAMERA_MODES),
+    )
+
+
+def active_iris_command(cur, device_id):
+    close_active_iris_commands(cur, device_id, "expired", only_expired=True)
+    cur.execute(
+        """
+        SELECT id, mode, patient_id, params FROM device_commands
+        WHERE device_id = %s AND mode IN %s AND status IN ('pending', 'in_progress')
+        ORDER BY created_at ASC LIMIT 1
+        """,
+        (device_id, CAMERA_MODES),
+    )
+    return cur.fetchone()
+
+
+def set_iris_progress(cur, command_id, progress):
+    cur.execute(
+        """
+        UPDATE device_commands SET status = 'in_progress', result = %s, updated_at = now()
+        WHERE id = %s AND status IN ('pending', 'in_progress')
+        """,
+        (psycopg2.extras.Json({"progress": progress}), command_id),
+    )
+
+
+def finish_command(cur, command_id, status, result):
+    cur.execute(
+        """
+        UPDATE device_commands SET status = %s, result = %s, updated_at = now()
+        WHERE id = %s AND status IN ('pending', 'in_progress')
+        """,
+        (status, psycopg2.extras.Json(result), command_id),
+    )
+
+
+def capture_answer(cur, capture_id, device_id, command_id, status, reason=None):
+    """Records and returns the final answer for a capture_id. RETRY answers
+    are not recorded: the Pi Zero is meant to resend that same capture."""
+    answer = {"capture_id": capture_id, "status": status}
+    if reason:
+        answer["reason"] = reason
+    cur.execute(f"DELETE FROM iris_captures WHERE created_at < now() - interval '{UNLINKED_IRIS_TTL}'")
+    cur.execute(
+        """
+        INSERT INTO iris_captures (device_id, capture_id, command_id, answer)
+        VALUES (%s, %s, %s, %s) ON CONFLICT (device_id, capture_id) DO NOTHING
+        """,
+        (device_id, capture_id, command_id, psycopg2.extras.Json(answer)),
+    )
+    return jsonify(answer)
+
+
+# Latest low-res preview frame per camera, so the operator can see where the
+# eye is while the camera scans. Memory only, never written to disk, and
+# served only while fresh.
+MAX_PREVIEW_B64 = 300 * 1024
+PREVIEW_MAX_AGE_SECONDS = 5
+iris_previews = {}  # device_id -> (jpeg bytes, time.monotonic())
+
+
+@app.route("/preview", methods=["POST"])
+def post_preview():
+    body = request.get_json(force=True, silent=True) or {}
+    device_id = body.get("device_id")
+    image_data = body.get("image_data")
+    if not device_id or not isinstance(image_data, str) or len(image_data) > MAX_PREVIEW_B64:
+        raise ApiError("device_id and image_data (base64 JPEG, max 300 KB) are required", 400)
+    try:
+        iris_previews[device_id] = (base64.b64decode(image_data, validate=True), time.monotonic())
+    except (binascii.Error, ValueError):
+        raise ApiError("image_data must be valid base64", 400)
+    return "", 204
+
+
+@app.route("/api/devices/<device_id>/preview", methods=["GET"])
+def get_preview(device_id):
+    frame = iris_previews.get(device_id)
+    if not frame or time.monotonic() - frame[1] > PREVIEW_MAX_AGE_SECONDS:
+        return "", 204
+    return Response(frame[0], mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+# Patient photos taken with the Pi Zero camera (photo_capture requests):
+# held in memory until the GUI collects them once, then dropped. The GUI
+# stages the photo in the registration draft like a webcam capture, and it
+# is only written to uploads/ when the patient is committed.
+PHOTO_MAX_AGE_SECONDS = 10 * 60
+camera_photos = {}  # command_id -> (jpeg bytes, time.monotonic())
+
+
+def store_camera_photo(command_id, jpeg):
+    now = time.monotonic()
+    for cid, (_, taken) in list(camera_photos.items()):
+        if now - taken > PHOTO_MAX_AGE_SECONDS:
+            camera_photos.pop(cid, None)
+    camera_photos[command_id] = (jpeg, now)
+
+
+@app.route("/api/devices/<device_id>/commands/<int:command_id>/photo", methods=["GET"])
+def get_camera_photo(device_id, command_id):
+    with local_db_cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM device_commands WHERE id = %s AND device_id = %s AND mode = 'photo_capture'",
+            (command_id, device_id),
+        )
+        if not cur.fetchone():
+            raise ApiError("Command not found", 404)
+    photo = camera_photos.pop(command_id, None)
+    if not photo or time.monotonic() - photo[1] > PHOTO_MAX_AGE_SECONDS:
+        raise ApiError("Photo not available; take it again", 404)
+    return Response(photo[0], mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    """Pi Zero discovery / readiness check. ready is true only while the GUI
+    has an active iris request for this camera."""
+    device_id = request.args.get("device_id")
+    command = None
+    if device_id:
+        with local_db_cursor() as cur:
+            command = active_iris_command(cur, device_id)
+    answer = {"status": "ok", "system": "LifeLink Pi 5", "ready": command is not None}
+    if command:
+        # What to capture: an eye crop for the engine, or a face photo.
+        answer["request"] = "photo" if command["mode"] == "photo_capture" else "iris"
+    return jsonify(answer)
+
+
+@app.route("/capture", methods=["POST"])
+def post_capture():
+    """The Pi Zero's best frame, processed against the oldest active request
+    for that camera: an eye crop for iris requests, a face photo for
+    photo_capture."""
+    body = request.get_json(force=True, silent=True) or {}
+    capture_id = body.get("capture_id")
+    device_id = body.get("device_id")
+    image_data = body.get("image_data")
+    if not capture_id or not device_id:
+        raise ApiError("capture_id and device_id are required", 400)
+    if not image_data or not isinstance(image_data, str) or len(image_data) > MAX_IRIS_IMAGE_B64:
+        raise ApiError("image_data (base64 image, max ~5 MB) is required", 400)
+
+    try:
+        raw = base64.b64decode(image_data, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError("image_data must be valid base64", 400)
+    image_hash = body.get("image_hash")
+    if image_hash and hashlib.sha256(raw).hexdigest() != str(image_hash).lower():
+        return jsonify({"capture_id": capture_id, "status": "RETRY", "reason": "checksum_mismatch"})
+
+    with local_db_cursor() as cur:
+        cur.execute(
+            "SELECT answer FROM iris_captures WHERE device_id = %s AND capture_id = %s",
+            (device_id, capture_id),
+        )
+        seen = cur.fetchone()
+        if seen:
+            return jsonify(seen["answer"])
+
+        command = active_iris_command(cur, device_id)
+        if not command:
+            return capture_answer(cur, capture_id, device_id, None, "SUCCESS", "no_active_request")
+
+        if command["mode"] == "photo_capture":
+            if not raw.startswith(b"\xff\xd8\xff"):
+                return capture_answer(cur, capture_id, device_id, command["id"], "RESCAN", "not_a_jpeg")
+            store_camera_photo(command["id"], raw)
+            finish_command(cur, command["id"], "done", {"photo_bytes": len(raw)})
+            return capture_answer(cur, capture_id, device_id, command["id"], "SUCCESS")
+
+        cur.execute("SELECT count(*) AS n FROM iris_captures WHERE command_id = %s", (command["id"],))
+        attempt = cur.fetchone()["n"] + 1
+        set_iris_progress(cur, command["id"], {"stage": "processing", "scan": attempt})
+
+        stored = []
+        if command["mode"] == "iris_verify":
+            cur.execute(
+                """
+                SELECT eye_side, pgp_sym_decrypt_bytea(template_data, %s) AS template_data
+                FROM iris_templates WHERE patient_id = %s
+                """,
+                (TEMPLATE_ENCRYPTION_KEY, command["patient_id"]),
+            )
+            stored = [{"eye_side": r["eye_side"],
+                       "template_data": base64.b64encode(bytes(r["template_data"])).decode()}
+                      for r in cur.fetchall()]
+            if not stored:
+                finish_command(cur, command["id"], "error", {"error": "no_iris_templates"})
+                return capture_answer(cur, capture_id, device_id, command["id"], "SUCCESS", "no_iris_templates")
+
+    # The engine call takes seconds; no transaction is held open across it.
+    try:
+        if command["mode"] == "iris_enroll":
+            code, engine = call_iris_engine("/extract", {"image_data": image_data})
+        else:
+            code, engine = call_iris_engine("/verify", {"image_data": image_data, "templates": stored})
+    except IrisEngineUnavailable as err:
+        app.logger.warning("Iris engine unreachable at %s: %s", IRIS_ENGINE_URL, err)
+        with local_db_cursor() as cur:
+            set_iris_progress(cur, command["id"], {"stage": "engine_unavailable", "scan": attempt})
+        return jsonify({"capture_id": capture_id, "status": "RETRY", "reason": "engine_unavailable"})
+
+    with local_db_cursor() as cur:
+        if code == 422:
+            reason = engine.get("reason") if isinstance(engine, dict) else None
+            set_iris_progress(cur, command["id"], {"stage": "rescan", "scan": attempt, "reason": reason})
+            return capture_answer(cur, capture_id, device_id, command["id"], "RESCAN", reason)
+        if code != 200:
+            app.logger.warning("Iris engine %s returned %s: %s", command["mode"], code, engine)
+            return jsonify({"capture_id": capture_id, "status": "RETRY", "reason": "engine_error"})
+
+        if command["mode"] == "iris_enroll":
+            eye_side = (command["params"] or {}).get("eye_side")
+            cur.execute(
+                f"DELETE FROM iris_templates WHERE patient_id IS NULL "
+                f"AND created_at < now() - interval '{UNLINKED_IRIS_TTL}'"
+            )
+            cur.execute(
+                """
+                INSERT INTO iris_templates
+                    (patient_id, eye_side, device_id, command_id, model_name, quality_score, template_data)
+                VALUES (NULL, %s, %s, %s, %s, %s, pgp_sym_encrypt_bytea(%s, %s))
+                """,
+                (eye_side, device_id, command["id"], engine["model_name"], engine.get("quality_score"),
+                 psycopg2.Binary(base64.b64decode(engine["template_data"])), TEMPLATE_ENCRYPTION_KEY),
+            )
+            result = {"eye_side": eye_side, "quality_score": engine.get("quality_score")}
+        else:
+            result = {k: engine.get(k) for k in ("match", "similarity", "eye_side", "threshold")}
+        finish_command(cur, command["id"], "done", result)
+        return capture_answer(cur, capture_id, device_id, command["id"], "SUCCESS")
+
+
+@app.route("/api/patients/<lifelink_id>/iris-templates", methods=["POST"])
+def link_patient_iris_templates(lifelink_id):
+    """Links a registration's two captured eyes ({command_ids: [...]}, from
+    their iris_enroll commands) to the newly created patient, in one
+    transaction. Replaces any iris templates the patient already had."""
+    body = request.get_json(force=True, silent=True) or {}
+    command_ids = body.get("command_ids")
+    if (not isinstance(command_ids, list) or len(command_ids) != 2
+            or not all(isinstance(c, int) for c in command_ids)):
+        raise ApiError("command_ids must be a list of the two iris_enroll command ids", 400)
+
+    get_patient_row_by_lifelink_id(lifelink_id)
+    with local_db_cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, eye_side FROM iris_templates
+            WHERE command_id = ANY(%s) AND patient_id IS NULL
+            FOR UPDATE
+            """,
+            (command_ids,),
+        )
+        rows = cur.fetchall()
+        if sorted(r["eye_side"] for r in rows) != ["left", "right"]:
+            raise ApiError("Need one captured, not yet linked template for each eye; re-capture the iris", 409)
+        cur.execute("DELETE FROM iris_templates WHERE patient_id = %s", (lifelink_id,))
+        cur.execute(
+            "UPDATE iris_templates SET patient_id = %s WHERE id = ANY(%s)",
+            (lifelink_id, [r["id"] for r in rows]),
+        )
+    return jsonify({"patient_id": lifelink_id, "stored": 2, "eye_sides": ["left", "right"]}), 201
 
 
 if __name__ == "__main__":

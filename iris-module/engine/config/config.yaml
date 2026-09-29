@@ -1,0 +1,38 @@
+camera:
+  backend: opencv_video
+  source: "0"
+  width: 1280
+  height: 720
+  fps: 30
+
+processing:
+  eye_roi:
+    rel_x: 0.15
+    rel_y: 0.15
+    rel_width: 0.70
+    rel_height: 0.70
+
+segmentation:
+  checkpoint_path: models/best_mobilenetv3.pt
+  thr_iris: 0.5
+  thr_pupil: 0.5
+
+normalization:
+  height: 64
+  width: 512
+
+recognition:
+  checkpoint_path: models/sota.pth
+  ft_pool: map
+  pos_embed: rope2d
+
+matching:
+  threshold: 0.84
+
+storage:
+  templates_dir: templates
+
+privacy:
+  save_raw_frames: false
+  save_normalized_iris: false
+  save_debug_images: true
