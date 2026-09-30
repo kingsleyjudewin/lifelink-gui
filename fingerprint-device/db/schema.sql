@@ -36,7 +36,7 @@ create table if not exists fingerprint_templates (
 create table if not exists device_commands (
   id          serial primary key,
   device_id   text not null,
-  mode        text not null check (mode in ('enroll', 'verify')),
+  mode        text not null check (mode in ('enroll', 'verify', 'identify')),
   patient_id  text,
   status      text not null default 'pending' check (status in ('pending', 'in_progress', 'done', 'error')),
   params      jsonb,  -- enroll: {exclude_templates: [...]} for the duplicate-finger check

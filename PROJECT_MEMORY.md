@@ -2,7 +2,7 @@
 
 A reference for anyone (human or AI) picking this project up later: how it is
 built, how the fingerprint and iris hardware really behave, and every bug
-that has been found and fixed. Last updated 2026-09-29.
+that has been found and fixed. Last updated 2026-09-30.
 
 ---
 
@@ -47,11 +47,21 @@ pgcrypto `pgp_sym_encrypt_bytea` (key = `TEMPLATE_ENCRYPTION_KEY` in
 - **Enroll:** 3 scans into temporary slot **199** → `GetTemplate(199)` →
   delete slot 199 → 498-byte template goes to the browser (held in the
   registration draft).
-- **Commit:** browser posts all 10 templates in one transaction to
-  `POST /api/patients/<id>/templates`.
-- **Verify:** device fetches the patient's templates, loads them into
-  temporary slots 199, 198, … (`SetTemplate`), captures one live finger,
-  runs `Verify1_1` against each slot, wipes the slots.
+- **Commit:** the browser sends the record, photo, all 10 templates and the
+  iris command ids in **one** `POST /api/patients`; the backend removes the
+  Supabase row + photo again if storing the biometrics fails (all or
+  nothing; the GUI keeps its draft and COMMIT can be retried).
+- **Verify (1:1, patient chosen):** device fetches the patient's templates,
+  loads them into temporary slots 199, 198, … (`SetTemplate`), captures one
+  live finger, runs `Verify1_1` against each slot, wipes the slots.
+- **Identify (1:N, no patient id, since 2026-09-30):** one live capture →
+  `MakeTemplate` (498 B probe) → `SetTemplate(199, probe)` → the device
+  pages through **every** stored template (`GET /api/fingerprint/candidates`,
+  20 per page, the chosen finger across all patients first) and sends each
+  with `Verify1_1_Template` (0x52) against slot 199 until one matches;
+  slot 199 is wiped after. Measured **~75 ms per comparison** on the real
+  sensor (20 templates in 1.5 s), so ~7.5 s for one finger across 100
+  patients. `Identify1_N` is still not used (false matches).
 - `device_slot` column is legacy and always `NULL`.
 
 ### Iris
@@ -207,11 +217,20 @@ the pupil, eye wide open. Laptop webcams can't focus very close (try
 
 | Method | Path | Used by | Purpose |
 |---|---|---|---|
-| POST | `/api/devices/<dev>/commands` | browser | Queue `{mode: enroll, exclude_templates}`, `{mode: verify, patient_id}`, `{mode: iris_enroll, eye_side: right/left}`, `{mode: iris_verify, patient_id}`, `{mode: photo_capture}` |
-| GET | `/api/devices/<dev>/commands/pending` | ESP32 | Atomically claim oldest command (204 if none); includes `params` |
-| GET | `/api/devices/<dev>/commands/<id>` | browser | Poll status/result (never returns `params`) |
-| POST | `/api/devices/<dev>/commands/<id>/progress` | ESP32 | Live step `{stage: place/lift/retry, scan, of}` |
-| POST | `/api/devices/<dev>/commands/<id>/result` | ESP32 | `done`/`error` + result |
+| POST | `/api/devices/<dev>/commands` | browser | Queue `{mode: enroll, exclude_templates}`, `{mode: verify, patient_id}`, `{mode: identify, finger?}`, `{mode: iris_enroll, eye_side: right/left}`, `{mode: iris_verify, patient_id}`, `{mode: photo_capture}`. Fingerprint modes: 503 `FINGERPRINT_DEVICE_OFFLINE` if the reader hasn't called in for 15 s; older open fingerprint requests become `superseded` |
+| GET | `/api/devices/<dev>/commands/pending` | device (key) | Atomically claim oldest command (204 if none); includes `params`. Expired ones are closed first |
+| GET | `/api/devices/<dev>/commands/<id>` | browser | Poll status/result (never returns `params`); an enroll `template_data` is returned once, then removed |
+| POST | `/api/devices/<dev>/commands/<id>/cancel` | browser | End an open request (timeout, left the page, skip) |
+| POST | `/api/devices/<dev>/commands/<id>/progress` | device (key) | Live step `{stage: place/lift/retry, scan, of}`; identify: `{stage: searching, checked, total}` |
+| POST | `/api/devices/<dev>/commands/<id>/result` | device (key) | `done`/`error` + result; **409** if the request is already closed |
+| GET | `/api/devices/status` | browser | `{device_id: {online, last_seen_seconds}}` |
+| GET | `/api/fingerprint/candidates?finger=&offset=&limit=` | ESP32 (key) | `{total, items: [{patient_id, finger_position, template_data}]}` for the 1:N search |
+
+Access (`require_caller`): device routes need `X-API-Key` = that device's
+entry in `DEVICE_API_KEYS` (backend/.env); all other routes only answer
+`GUI_ALLOWED_NETS` (default 127.0.0.0/8). Other routes: `/api/audit`
+(GET/POST), `/api/draft` (GET/PUT/DELETE), `/api/system/status`,
+`/api/system/integrity`, `/fonts/<file>`.
 
 ### Fingerprint templates
 
@@ -466,6 +485,34 @@ Device error codes → UI text in `index.html`:
   labels, or bolt/skip icons on the secondary buttons. The platen graphic with
   its scan line and the iris reticle/live preview stay. Their JS updaters and
   translation rows were removed too.
+- Fingerprint scanner visual replaced (user's reference image): circuit-ring
+  emblem — three SVG ring layers (`.fp-ring--a/b/c`, rotating 70/100/140 s)
+  around a raised disc with a symmetric loop-pattern print (`#fp-ridges`:
+  22 evenly spaced hairpin ridges, mirrored breaks, no randomness; faded at
+  the sides and base by two masks; shared by a base and an "ink" layer). `#fp-scanner[data-state]` =
+  idle | scanning | lift | success | captured | error, set by
+  `setScannerState()` in LifeLinkBiometrics (scan start/progress/success/
+  failure, and `renderFingerprintView` when not scanning). Scanning = green
+  beam sweep revealing the print + green nodes; success = check badge.
+  `#scan-feedback-txt` is now the caption under the emblem.
+- Names in regional scripts (user decision 2026-09-30): names are SAVED exactly as
+  typed (English) and only DISPLAYED transliterated. `i18n/transliterate.js` is an
+  offline rule-based English→Devanagari phonetic converter, shifted into the other
+  Indic blocks with per-script fixes (Tamil folding + ந/ன + nasal classes,
+  Assamese ৰ/ৱ/য়, Malayalam chillu + nasal clusters, final virama in ta/te/kn/ml).
+  Elements marked `data-translit` are transliterated by lifelink-i18n.js (dictionary
+  fallbacks like "UNNAMED PATIENT" still translate); `{{name}}` pattern values too.
+  Inputs with `data-translit-input="<id>"` show a live "↳ script" preview line.
+  Google Input Tools was rejected: it would send patient names off-device.
+  Approximate for some spellings (Rahul → रहुल): English doesn't mark long vowels.
+
+### 2026-09-30 — fingerprint device: no more reflashing per network
+| Issue | Fix / status |
+|---|---|
+| Every new WiFi/hotspot needed a reflash: `config.py` had one SSID and the laptop's IP hard-coded in `BACKEND_BASE_URL` (DHCP gives a new IP per network) | `WIFI_NETWORKS` list (strongest known network in range wins); backend discovery: device broadcasts `LIFELINK_DISCOVER` on UDP 37020, `backend/app.py` `run_discovery_responder` replies `LIFELINK_BACKEND <port>`, device uses the reply's source IP; cached in `backend_url.txt` on the ESP32, re-discovered after every WiFi connect and after 3 failed requests. `BACKEND_BASE_URL` is now only a fallback |
+| Verified on hardware: joined "Segue" (SSID is capitalised, case-sensitive) -52 dBm, discovered `http://60.70.3.137:3000`, sensor fw 20171018 up. ufw on the laptop lets the UDP reply through | Done |
+| Two stale commands (#146 verify, #147 enroll from 11:51) were waiting in `device_commands` and ran first after boot | Both timed out (`finger_timeout`); queue empty. Scans pressed while the board is offline stay queued — watch for this |
+| Adding a network later = one line in `WIFI_NETWORKS` + reflash of `config.py` only; a new backend IP needs nothing | — |
 
 ### Data cleanup done
 - 9 legacy prints wiped from the sensor (slots 0–8, old design).
@@ -501,35 +548,60 @@ Device error codes → UI text in `index.html`:
 
 ---
 
+### 2026-09-30 — deep-audit fixes + fingerprint identify without an ID
+All of these were verified: backend API test 54/54, headless-Chrome GUI test
+24/24 at 800×480 (with a simulated reader), offline test with Supabase
+unreachable, and the real ESP32 on the new firmware (identify → clean
+`finger_timeout` with no finger; key auth accepted). Test scripts are not in
+the repo (scratch only).
+
+| # | Issue | Fix |
+|---|---|---|
+| — | No way to identify an unknown / unconscious patient (Identify was 1:1 only) | New `identify` command mode: **IDENTIFY BY FINGER** on the Identify page, no patient id. Firmware `modes.identify_mode`, driver `verify_template` (0x52), `GET /api/fingerprint/candidates`. Finger selector (right index default, "not sure" = all fingers). Iris stays 1:1 |
+| 2 / 19 | Stale fingerprint requests took the next finger; a lost result left the request `in_progress` forever | GUI cancels on timeout and when leaving the page (`cancelScansNotOn`); a new fingerprint request supersedes older open ones; backend expires unclaimed ones after 3 min (`expired`) and silent claimed ones after 90 s (`device_lost`); device retries the result POST 6× with backoff, 409 = request closed, drop it |
+| 20 | One failed poll ended a scan | `pollDeviceCommand` retries until the backend has been unreachable for 15 s |
+| 3 | Enroll-page iris green box wider than the image (531 vs 348 px) | Preview frame is always exactly 16:9 (`.iris-live-frame`, container query units), image `object-fit: fill` → green box = central 70% of the frame on both pages. Measured in Chrome: box = 0.70 × image width, offset 0.15 |
+| 4 / 43 | Plaintext templates in `device_commands` | Enroll template is handed to the GUI **once** then removed from the row (`template_collected: true`); `params` (duplicate-check templates) set NULL when a request ends; backend start scrubs old rows and deletes finished commands > 7 days (removed 40 copies here) |
+| 5 | "30-35 CM" eye distance | "EYE ABOUT 8–10 CM FROM THE CAMERA" (estimate for the Wide lens; measure on the real camera). Photo hint 30–40 cm |
+| 7 / 13 | Open API on every network | `require_caller` in app.py: device routes need the device's own `X-API-Key` (`DEVICE_API_KEYS` in `.env`; camera key can't use fingerprint routes, a key only acts for its own device id); everything else (GUI, photos) only from `GUI_ALLOWED_NETS` (default localhost). CORS removed. `setup_network.sh` adds an nftables rule: ports 3000/37020/8010 only on lo + wlan0 |
+| 8 / 39 | Failed commit lost the fingerprints / half-created patients | One atomic `POST /api/patients` (see §2); draft kept on failure |
+| 9 | "ALL SENSORS ONLINE" fixed text; ESP32 offline = 3 min wait | `device_last_seen` (updated on every authenticated device call), `GET /api/devices/status`; fingerprint request to an offline reader fails at once (`FINGERPRINT_DEVICE_OFFLINE`, 503); live dots on Identify + footer |
+| 11 / 12 | Tapping a patient faked "99.8% CERTAINTY"; newest patient auto-selected | `simulateAuthenticate` and `ensureIdentifyDefaultPatient` removed. Tapping only selects (then CONFIRM by finger or iris); entering Identify clears any selection. There is no biometric-free way into a record now |
+| 14 | Everything went through Supabase; 120 s timeouts | Supabase timeout 6 s (`SUPABASE_TIMEOUT_SECONDS`); fingerprint paths check the local tables only; `patient_cache` table: last copy of every viewed/created patient, served (marked `offline`) when Supabase is unreachable (list, search, record) |
+| 15 | Fonts/icons from Google | Geist + Material Symbols in `fonts/` (served at `/fonts/`); Indic Noto still from Google or `fonts-noto-core` |
+| 16 | Draft only in browser memory | Mirrored to backend **memory** (`/api/draft`, never disk, 2 h idle expiry), restored on page load |
+| 18 | Fake Settings (calibrate, NIR strobe, key rotation, invented audit lines) | Settings rebuilt on `GET /api/system/status` + `GET /api/system/integrity` (decrypts every template, walks the audit chain, counts plaintext copies); fake actions removed; export renamed "patient list" |
+| 21 | Sample data used an Unsplash URL | Generated placeholder portrait (data URL) |
+| 22 | Names/errors inserted as raw HTML | `LifeLinkUtil.escapeHtml` / `esc()` on every data interpolation in `innerHTML` templates (104 lines). Tested with a `<img onerror>` name |
+| 40 | `,` `(` `)` in search → 500 | `safe_search_term` |
+| 41 | Audit log in localStorage | `audit_events` table (hash-chained), `POST/GET /api/audit` |
+| 31 | Camera retried forever on a camera fault | Stops once `/health` says the request is gone |
+| 35 | Unquoted systemd paths; `/etc/hosts` after hostname change | Quoted `ExecStart` (checked with `systemd-analyze verify`); hosts line fixed in `setup_network.sh`; camera key via `/etc/lifelink-camera.env` (asked by `install_pizero.sh`) |
+| — | `translations.js` last row had no trailing comma, so the next appended row became `row[...]` (undefined) and crashed lifelink-i18n.js | Comma added |
+
+Backend now applies `backend/local_schema.sql` on every start (mode
+constraint incl. `identify`, `patient_cache`, `audit_events`).
+
 ## 9. Known open items
 
-- **Deep audit 2026-09-29 (Pi 5 16 GB + Pi Zero camera + 5" 800×480 display), not yet fixed:**
-  1. `index.html` line 13: supplemental `<style>` is never closed → the font
-     `@import` and `:root` tokens are swallowed as invalid CSS; Material
-     Symbols icons render as words ("arrow_back"), Inter never loads. Since `40a3e2e`.
-  2. Fingerprint commands are never cancelled/expired: a GUI timeout leaves the
-     command `pending`; the ESP32 later claims it first (oldest-first) and eats
-     the operator's next placements. Iris/photo have TTL+cancel, fingerprint doesn't.
-  3. Iris enroll page green box is 70% of the *wrapper*, but the image is
-     `object-fit: contain` in a non-16:9 wrapper → at 800×480 box 531 px wide vs
-     real engine crop 348 px (identify page is correct, it's 16:9).
-  4. Plaintext templates in `device_commands`: 30 `result` rows + 168 copies in
-     `params.exclude_templates` (measured on the laptop DB).
-  5. Flask on 0.0.0.0 with no auth → on the Pi 5 the Ethernet (hospital) LAN can
-     GET decrypted templates. Firewall port 3000 to lo + wlan0.
-  6. Camera distance: validator needs iris ≥ 2% of the 896×504 crop (≈107 px
-     diameter) → eye must be ≈10–12 cm from a CM3/CM2 at 1280×720; GUI says
-     "32 CM". Needs focus set (CM3 AfMode) or higher capture resolution.
-  7. Preview only exists during the ~1 s scan → no aiming time for the photo
-     (face) or the eye; add an aiming phase.
-  8. Commit: `resetDraft()` runs even when fingerprint storing failed → templates
-     lost, patient exists without prints, no re-enroll path.
-  9. No device-online signal: ESP32 offline → GUI waits 180 s; "ALL SENSORS
-     ONLINE" is static text. Leaving the iris page doesn't cancel the scan.
-  10. Pages overflow 800×480 (fingerprint 842 px, iris 1001 px tall).
-  Verified OK: both model checkpoints load every key (LightIrisNet 420/420,
-  IrisFormer 304/304; only the unused `ft_head` is skipped).
+- **1:N fingerprint on real fingers is not yet confirmed**: the sensor
+  commands work (template-vs-template 75 ms, identical → match, other
+  fingers → no match), but a single-capture probe vs. a 3-scan enrolled
+  template still has to be tried with a live finger.
+- Iris is still 1:1 (needs a selected patient). A 1:N iris search could be
+  done on the Pi 5 (engine compares embeddings), not built.
+- Camera-side items from the deep audit are still open (need the real
+  Pi Zero + CM3 Wide): autofocus (`AfMode`), aiming phase, always-on Pi Zero,
+  6→2–3 buffers, engine double pass, threshold recalibration, head tilt.
+- No biometric-free override into a record (removed with the fake auth).
+  Decide if an audited "open without biometric" is needed for patients
+  whose fingers/eyes can't be scanned.
+- Data sent over the Pi 5 Wi-Fi is plain HTTP (templates to the ESP32).
+- No backups (key, local DB, uploads).
 
+- Deep audit 2026-09-29/30: items 1–4, 8, 9, 10 and the 2026-09-30 list
+  are fixed (see the bug log above). Still open: camera distance/focus
+  measurement on the real CM3 Wide, aiming phase.
 - **Pi 5 deployment checklist** (review 2026-09-29): commit `iris-module/`
   first (untracked); fix the unquoted systemd paths (above); install
   Postgres + create the `lifelink` role/db by hand (not scripted), apply
@@ -547,16 +619,6 @@ Device error codes → UI text in `index.html`:
   scripts, enroll + identify one real person, check Pi 5 timing.
 - Iris page labels still say "850NM NIR ILLUMINATOR ARMED", "Dual-NIR",
   "2048 × 1536 NIR" — the model is visible-light. Cosmetic.
-- Identify page "MANUAL QUERY & REGISTERED PATIENT ARCHIVE": clicking a
-  patient calls `simulateAuthenticate` (fake 99.8% match, no biometric).
-  Bypasses both fingerprint and iris — decide whether to keep as an
-  emergency fallback.
-- `device_commands.result` keeps an **unencrypted copy** of each captured
-  fingerprint template. Scrub it once the browser has read it, or purge old
-  rows. (Iris results hold no template bytes.)
-- No authentication on any API (device, camera or browser). The original
-  fingerprint module had API-key auth + a hash-chained audit log — not
-  carried over.
 - No cross-patient duplicate check (same person registered twice).
 - `README.md` is outdated (says Tailwind CDN, `server.py`, simulated iris);
   `fingerprint-device/README.md` still describes Fernet and per-template

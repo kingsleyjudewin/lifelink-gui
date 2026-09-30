@@ -19,6 +19,29 @@ nmcli connection add type wifi ifname wlan0 con-name ProjectNet autoconnect yes 
 nmcli connection up ProjectNet
 
 hostnamectl set-hostname main-pi
+# Keep 127.0.1.1 in step with the new hostname (sudo warns otherwise).
+sed -i '/^127\.0\.1\.1/d' /etc/hosts && echo "127.0.1.1 main-pi" >> /etc/hosts
+
+# Firewall: the LifeLink backend (TCP 3000) and device discovery (UDP 37020)
+# only answer this Pi itself and the private Wi-Fi, never the Ethernet
+# (hospital) network. The API also checks per-device keys; this is the
+# second layer.
+apt-get install -y nftables
+cat > /etc/nftables.d-lifelink.conf <<'NFT'
+table inet lifelink {
+  chain input {
+    type filter hook input priority 0; policy accept;
+    iifname { "lo", "wlan0" } accept
+    tcp dport 3000 drop
+    udp dport 37020 drop
+    tcp dport 8010 drop
+  }
+}
+NFT
+grep -q nftables.d-lifelink.conf /etc/nftables.conf || echo 'include "/etc/nftables.d-lifelink.conf"' >> /etc/nftables.conf
+systemctl enable nftables
+nft delete table inet lifelink 2>/dev/null || true
+nft -f /etc/nftables.d-lifelink.conf
 apt-get install -y avahi-daemon
 systemctl enable --now avahi-daemon
 echo "Done: Wi-Fi '$SSID' on 192.168.50.1, hostname main-pi.local"

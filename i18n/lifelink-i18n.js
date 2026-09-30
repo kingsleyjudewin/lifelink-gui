@@ -79,7 +79,8 @@
       const vars = {};
       p.names.forEach((name, i) => {
         const value = m[i + 1];
-        const translated = lookup(value, (depth || 0) + 1);
+        // {{name}} placeholders hold a person's name: show it in the UI script
+        const translated = name === 'name' ? transliterateName(value) : lookup(value, (depth || 0) + 1);
         vars[name] = translated == null ? value : translated;
       });
       const out = i18next.t(p.key, vars);
@@ -99,6 +100,21 @@
     return lead + out + trail;
   }
 
+  // Names (patients, contacts) are stored in English and only DISPLAYED in the
+  // UI script, via the offline transliterator in transliterate.js.
+  function transliterateName(text) {
+    const lang = i18next.language;
+    if (lang === 'en' || !window.LifeLinkTranslit) return text;
+    return window.LifeLinkTranslit.transliterate(text, lang);
+  }
+
+  // Text inside [data-translit]: UI fallbacks ("UNNAMED PATIENT", "None recorded")
+  // still use the dictionary; anything else is a name and is transliterated.
+  function translateNameText(src) {
+    if (i18next.language === 'en') return src;
+    return lookup(src) != null ? translateString(src) : transliterateName(src);
+  }
+
   // ------------------------------------------------------------ DOM
   const textState = new WeakMap(); // Text -> { src, out }
   const attrState = new WeakMap(); // Element -> { [attr]: { src, out } }
@@ -112,7 +128,7 @@
     const prev = textState.get(node);
     // Our own output → keep the remembered English source; anything else is new app text.
     const src = prev && node.data === prev.out ? prev.src : node.data;
-    const out = translateString(src);
+    const out = node.parentElement.closest('[data-translit]') ? translateNameText(src) : translateString(src);
     textState.set(node, { src, out });
     if (node.data !== out) node.data = out;
   }
@@ -209,6 +225,24 @@
     }, true);
   }
 
+  // ------------------------------------------------------------ name input previews
+  // <input data-translit-input="previewId">: the value stays in English (that is what
+  // gets saved); the preview line under it shows the name in the UI script.
+  function updateNamePreview(input) {
+    const preview = document.getElementById(input.getAttribute('data-translit-input'));
+    if (!preview) return;
+    const value = input.value.trim();
+    const show = i18next.language !== 'en' && /[A-Za-z]/.test(value);
+    preview.hidden = !show;
+    preview.textContent = show ? transliterateName(value) : '';
+  }
+  function refreshNamePreviews() {
+    document.querySelectorAll('[data-translit-input]').forEach(updateNamePreview);
+  }
+  document.addEventListener('input', (e) => {
+    if (e.target.matches && e.target.matches('[data-translit-input]')) updateNamePreview(e.target);
+  });
+
   // ------------------------------------------------------------ public API
   function setLanguage(code) {
     if (!LANGS.some((l) => l.code === code)) code = 'en';
@@ -233,11 +267,14 @@
       attributes: true,
       attributeFilter: ATTRS
     });
+    refreshNamePreviews();
   }
 
   window.LifeLinkI18n = {
     setLanguage,
     translate: (text) => translateString(text),
+    transliterate: (text) => transliterateName(text),
+    refreshNamePreviews,
     get language() { return i18next.language; }
   };
 

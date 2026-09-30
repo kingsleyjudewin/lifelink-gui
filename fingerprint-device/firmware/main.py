@@ -10,6 +10,30 @@ from fplibMicro import Fingerprint, SensorError
 wlan = network.WLAN(network.STA_IF)
 
 
+def known_networks():
+    """config.WIFI_NETWORKS = [(ssid, password), ...]; the old single
+    WIFI_SSID/WIFI_PASSWORD pair is still accepted."""
+    nets = list(getattr(config, "WIFI_NETWORKS", []))
+    if hasattr(config, "WIFI_SSID"):
+        nets.append((config.WIFI_SSID, getattr(config, "WIFI_PASSWORD", "")))
+    return nets
+
+
+def visible_networks():
+    """{ssid: rssi} of the networks currently in range."""
+    seen = {}
+    try:
+        for entry in wlan.scan():  # (ssid, bssid, channel, RSSI, security, hidden)
+            try:
+                ssid = entry[0].decode()
+            except UnicodeError:
+                continue
+            seen[ssid] = max(entry[3], seen.get(ssid, -999))
+    except OSError as e:
+        print(">> WiFi scan failed:", e)
+    return seen
+
+
 def connect_wifi():
     # A fresh boot can leave the WLAN driver in a state where connect()
     # raises `OSError: Wifi Internal State Error` -- toggling active(False)
@@ -19,21 +43,33 @@ def connect_wifi():
     wlan.active(True)
     utime.sleep_ms(200)
 
-    print(">> connecting to WiFi: %r" % config.WIFI_SSID)
-    try:
-        wlan.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
-    except OSError as e:
-        print(">> wlan.connect() failed:", e)
-        return False
-
-    deadline = utime.ticks_add(utime.ticks_ms(), 15000)
-    while not wlan.isconnected():
-        if utime.ticks_diff(deadline, utime.ticks_ms()) <= 0:
-            print(">> WiFi connect timed out")
-            return False
-        utime.sleep_ms(200)
-    print(">> WiFi connected:", wlan.ifconfig())
-    return True
+    known = known_networks()
+    seen = visible_networks()
+    in_range = sorted([n for n in known if n[0] in seen], key=lambda n: -seen[n[0]])
+    # Known networks in range, strongest first; if none show up (hidden SSID,
+    # failed scan) just try every known network in order.
+    for ssid, password in (in_range or known):
+        print(">> connecting to WiFi: %r%s" % (ssid, " (%d dBm)" % seen[ssid] if ssid in seen else ""))
+        try:
+            wlan.connect(ssid, password)
+        except OSError as e:
+            print(">> wlan.connect() failed:", e)
+            continue
+        deadline = utime.ticks_add(utime.ticks_ms(), 15000)
+        while not wlan.isconnected() and utime.ticks_diff(deadline, utime.ticks_ms()) > 0:
+            utime.sleep_ms(200)
+        if wlan.isconnected():
+            print(">> WiFi connected to %r:" % ssid, wlan.ifconfig())
+            # New network => the backend may have a new IP: look it up now.
+            device_api.discover_backend()
+            return True
+        print(">> WiFi connect to %r timed out" % ssid)
+        try:
+            wlan.disconnect()
+        except OSError:
+            pass
+    print(">> no known WiFi network reachable (known: %s)" % ", ".join(repr(n[0]) for n in known))
+    return False
 
 
 def rx_line_floating(pin_no):
@@ -103,6 +139,18 @@ def handle_backend_command(fp, command):
         else:
             payload = {"status": "error", "result": {
                 "error": capture["error"], "duplicate_of": capture.get("duplicate_of")}}
+    elif mode == "identify":
+        params = command.get("params") or {}
+        result = modes.identify_mode(
+            fp, params.get("finger"),
+            on_progress=lambda p: device_api.post_command_progress(config.DEVICE_ID, command_id, p),
+        )
+        if result["ok"]:
+            payload = {"status": "done", "result": {
+                "match": result["match"], "patient_id": result.get("patient_id"),
+                "finger_position": result.get("finger_position"), "checked": result["checked"]}}
+        else:
+            payload = {"status": "error", "result": {"error": result["error"]}}
     else:
         result = modes.verify_mode(fp, command["patient_id"])
         if "match" in result:
@@ -117,11 +165,11 @@ def handle_backend_command(fp, command):
         else:
             payload = {"status": "error", "result": {"error": result.get("error", "verify_failed")}}
 
-    device_api.post_command_result(config.DEVICE_ID, command_id, payload)
+    delivered = device_api.post_command_result(config.DEVICE_ID, command_id, payload)
     summary = dict(payload["result"])
     if "template_data" in summary:
         summary["template_data"] = "<%d b64 chars>" % len(summary["template_data"])
-    print(">> reported:", payload["status"], summary)
+    print(">> reported:" if delivered else ">> NOT delivered:", payload["status"], summary)
 
 
 def run_enroll_standalone(fp):
@@ -148,7 +196,7 @@ def main():
     fp = init_sensor()
     button = Pin(config.BUTTON_PIN, Pin.IN, Pin.PULL_UP)
 
-    print(">> ready -- polling %s for commands as %s" % (config.BACKEND_BASE_URL, config.DEVICE_ID))
+    print(">> ready -- polling %s for commands as %s" % (device_api.base_url(), config.DEVICE_ID))
     print(">> button: hold >= %dms for standalone ENROLL, tap for VERIFY" % config.LONG_PRESS_MS)
     while True:
         try:

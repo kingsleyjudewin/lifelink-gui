@@ -30,23 +30,26 @@ Open:  http://localhost:3000
 import base64
 import binascii
 import hashlib
+import hmac
+import ipaddress
 import json
 import os
 import random
 import re
 import string
+import threading
 import time
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from urllib import error as urlerror, request as urlrequest
 
+import httpx
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request, send_from_directory, abort
-from flask_cors import CORS
-from supabase import create_client
+from supabase import ClientOptions, create_client
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
@@ -68,7 +71,30 @@ LOCAL_DB_CONFIG = {
     "password": os.environ.get("LOCAL_DB_PASSWORD", "lifelink"),
 }
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+# Short timeouts: when the internet is down the GUI must fail fast (and fall
+# back to the local patient cache) instead of hanging for the 120 s default.
+SUPABASE_TIMEOUT_SECONDS = float(os.environ.get("SUPABASE_TIMEOUT_SECONDS", 6))
+supabase = create_client(
+    SUPABASE_URL, SUPABASE_SECRET_KEY,
+    options=ClientOptions(postgrest_client_timeout=SUPABASE_TIMEOUT_SECONDS,
+                          storage_client_timeout=int(SUPABASE_TIMEOUT_SECONDS)),
+)
+
+# Who may call what (see require_caller below):
+#  - device endpoints need the calling device's own key (X-API-Key), from
+#    DEVICE_API_KEYS="dev-esp32-1:<key>,iris-cam-1:<key>";
+#  - every other /api route is the kiosk GUI and is only served to
+#    GUI_ALLOWED_NETS (default: this machine only).
+DEVICE_API_KEYS = {}
+for _pair in (os.environ.get("DEVICE_API_KEYS") or "").split(","):
+    if ":" in _pair:
+        _dev, _key = _pair.split(":", 1)
+        if _dev.strip() and _key.strip():
+            DEVICE_API_KEYS[_dev.strip()] = _key.strip()
+GUI_ALLOWED_NETS = [
+    ipaddress.ip_network(n.strip(), strict=False)
+    for n in (os.environ.get("GUI_ALLOWED_NETS") or "127.0.0.0/8,::1/128").split(",") if n.strip()
+]
 
 
 @contextmanager
@@ -84,14 +110,81 @@ def local_db_cursor():
         conn.close()
 
 app = Flask(__name__, static_folder=None)
-CORS(app)
+# No CORS: the GUI is served from this same origin, and no other web page may
+# call the API from the kiosk browser.
+
+CAMERA_DEVICE_IDS = {d.strip() for d in (os.environ.get("CAMERA_DEVICE_IDS") or "iris-cam-1").split(",") if d.strip()}
+
+# endpoint -> where the calling device's id comes from. These are the only
+# routes reachable from other machines; each needs that device's own key.
+DEVICE_ROUTES = {
+    "get_pending_device_command": "path",
+    "post_device_command_result": "path",
+    "post_device_command_progress": "path",
+    "get_patient_templates": "fingerprint",
+    "get_fingerprint_candidates": "fingerprint",
+    "verify_fingerprint": "fingerprint",
+    "enroll_fingerprint": "fingerprint",
+    "post_capture": "body",
+    "post_preview": "body",
+    "health": "query",
+}
+device_last_seen = {}  # device_id -> time.monotonic() of its last authenticated call
+
+
+def device_for_key():
+    key = request.headers.get("X-API-Key") or ""
+    for device_id, expected in DEVICE_API_KEYS.items():
+        if key and hmac.compare_digest(expected, key):
+            return device_id
+    return None
+
+
+def remote_is_gui():
+    try:
+        addr = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    if getattr(addr, "ipv4_mapped", None):
+        addr = addr.ipv4_mapped
+    return any(addr in net for net in GUI_ALLOWED_NETS)
+
+
+@app.before_request
+def require_caller():
+    kind = DEVICE_ROUTES.get(request.endpoint)
+    if kind is None:
+        # The kiosk GUI (pages, photos, every other /api route).
+        if not remote_is_gui():
+            return jsonify({"error": "forbidden"}), 403
+        return None
+    if kind == "query" and not request.args.get("device_id"):
+        return None  # bare /health: "is this the LifeLink Pi?" discovery only
+    device_id = device_for_key()
+    if device_id is None:
+        return jsonify({"error": "missing or wrong X-API-Key"}), 401
+    if kind == "path":
+        claimed = (request.view_args or {}).get("device_id")
+    elif kind == "query":
+        claimed = request.args.get("device_id")
+    elif kind == "body":
+        claimed = (request.get_json(force=True, silent=True) or {}).get("device_id")
+    else:  # fingerprint templates / results: any fingerprint reader, never a camera
+        claimed = device_id if device_id not in CAMERA_DEVICE_IDS else None
+    if claimed != device_id:
+        return jsonify({"error": "this key belongs to another device"}), 403
+    device_last_seen[device_id] = time.monotonic()
+    return None
 
 RECORD_CATEGORIES = {
     "Visits", "Diagnoses", "Prescriptions", "Lab Reports",
     "Surgeries", "Vaccinations", "Scans", "Discharge Summaries",
 }
 ALLERGY_CATEGORIES = {"drug", "food", "environmental"}
-DEVICE_COMMAND_MODES = {"enroll", "verify", "iris_enroll", "iris_verify", "photo_capture"}
+DEVICE_COMMAND_MODES = {"enroll", "verify", "identify", "iris_enroll", "iris_verify", "photo_capture"}
+# Requests served by the ESP32 fingerprint reader.
+FINGERPRINT_MODES = ("enroll", "verify", "identify")
+FINGER_POSITIONS = ("R1", "R2", "R3", "R4", "R5", "L1", "L2", "L3", "L4", "L5")
 # Requests served by the Pi Zero camera: iris scans and the patient photo.
 CAMERA_MODES = ("iris_enroll", "iris_verify", "photo_capture")
 IRIS_EYE_SIDES = {"left", "right"}
@@ -110,6 +203,53 @@ class ApiError(Exception):
 def handle_api_error(err):
     app.logger.warning("%s %s -> %s: %s", request.method, request.path, err.status, err.message)
     return jsonify({"error": err.message}), err.status
+
+
+@app.errorhandler(httpx.TransportError)
+def handle_supabase_unreachable(err):
+    app.logger.warning("%s %s -> Supabase unreachable: %s", request.method, request.path, err)
+    return jsonify({"error": "Patient records server (Supabase) is unreachable. "
+                             "Check the internet connection.", "offline": True}), 503
+
+
+def cache_patient(record):
+    """Keeps the last known copy of a patient for offline use."""
+    summary = {
+        "id": record["id"], "fullName": record["fullName"], "gender": record.get("gender") or "",
+        "bloodGroup": record.get("bloodGroup") or "", "age": record.get("age"),
+        "photoUrl": record.get("photoUrl") or "",
+    }
+    with local_db_cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO patient_cache (lifelink_id, full_name, summary, record, created_at, cached_at)
+            VALUES (%s, %s, %s, %s, %s, now())
+            ON CONFLICT (lifelink_id) DO UPDATE SET full_name = EXCLUDED.full_name,
+                summary = EXCLUDED.summary, record = EXCLUDED.record,
+                created_at = COALESCE(EXCLUDED.created_at, patient_cache.created_at), cached_at = now()
+            """,
+            (record["id"], record["fullName"], psycopg2.extras.Json(summary),
+             psycopg2.extras.Json(record), record.get("createdAt")),
+        )
+    return record
+
+
+def cached_patient_summaries(query=None):
+    with local_db_cursor() as cur:
+        if query:
+            like = f"%{query}%"
+            cur.execute(
+                "SELECT summary FROM patient_cache WHERE lifelink_id ILIKE %s OR full_name ILIKE %s "
+                "ORDER BY created_at DESC NULLS LAST LIMIT 20", (like, like))
+        else:
+            cur.execute("SELECT summary FROM patient_cache ORDER BY created_at DESC NULLS LAST")
+        return [dict(r["summary"], offline=True) for r in cur.fetchall()]
+
+
+def safe_search_term(q):
+    """PostgREST's or=(...) filter syntax breaks on , ( ) and quotes; keep
+    only characters a name or LifeLink id can contain."""
+    return re.sub(r"[^\w\s\-.'@]", " ", q, flags=re.UNICODE).strip()
 
 
 def parse_date_or_none(value, field_label):
@@ -408,14 +548,18 @@ def uploaded_file(filename):
 
 @app.route("/api/patients", methods=["GET"])
 def list_patients():
-    """Lightweight list — used by the Identify page's quick-select list."""
-    rows = (
-        supabase.table("patients")
-        .select("lifelink_id, full_name, gender, blood_group, date_of_birth, photo_path")
-        .order("created_at", desc=True)
-        .execute()
-        .data
-    )
+    """Lightweight list — used by the Identify page's quick-select list.
+    Offline: the locally cached patients (each marked offline: true)."""
+    try:
+        rows = (
+            supabase.table("patients")
+            .select("lifelink_id, full_name, gender, blood_group, date_of_birth, photo_path")
+            .order("created_at", desc=True)
+            .execute()
+            .data
+        )
+    except httpx.TransportError:
+        return jsonify(cached_patient_summaries())
     return jsonify([{
         "id": r["lifelink_id"],
         "fullName": r["full_name"],
@@ -429,17 +573,20 @@ def list_patients():
 @app.route("/api/patients/search", methods=["GET"])
 def search_patients():
     """MRN / name search for the Identify page's manual fallback."""
-    q = (request.args.get("q") or "").strip()
+    q = safe_search_term(request.args.get("q") or "")
     if not q:
         return jsonify([])
-    rows = (
-        supabase.table("patients")
-        .select("lifelink_id, full_name, gender, blood_group, date_of_birth, photo_path")
-        .or_(f"lifelink_id.ilike.%{q}%,full_name.ilike.%{q}%")
-        .limit(20)
-        .execute()
-        .data
-    )
+    try:
+        rows = (
+            supabase.table("patients")
+            .select("lifelink_id, full_name, gender, blood_group, date_of_birth, photo_path")
+            .or_(f"lifelink_id.ilike.%{q}%,full_name.ilike.%{q}%")
+            .limit(20)
+            .execute()
+            .data
+        )
+    except httpx.TransportError:
+        return jsonify(cached_patient_summaries(q))
     return jsonify([{
         "id": r["lifelink_id"],
         "fullName": r["full_name"],
@@ -452,18 +599,47 @@ def search_patients():
 
 @app.route("/api/patients/<lifelink_id>", methods=["GET"])
 def get_patient(lifelink_id):
-    row = get_patient_row_by_lifelink_id(lifelink_id)
-    return jsonify(assemble_patient(row))
+    """Offline: the last cached copy, marked offline: true."""
+    try:
+        record = assemble_patient(get_patient_row_by_lifelink_id(lifelink_id))
+    except httpx.TransportError:
+        with local_db_cursor() as cur:
+            cur.execute("SELECT record, cached_at FROM patient_cache WHERE lifelink_id = %s", (lifelink_id,))
+            cached = cur.fetchone()
+        if not cached:
+            raise
+        return jsonify(dict(cached["record"], offline=True, cachedAt=cached["cached_at"].isoformat()))
+    return jsonify(cache_patient(record))
 
 
 @app.route("/api/patients", methods=["POST"])
 def create_patient():
-    """Commit step: registration draft (patient-info + medical-info +
-    photo) becomes a real persisted patient."""
+    """Commit step: the registration draft (patient info, medical info,
+    photo, fingerprints, iris) becomes a persisted patient, all or nothing.
+    Every input is validated before the first write; if storing the
+    biometrics fails, the Supabase record and the photo are removed again,
+    so a patient never exists without their fingerprints. The GUI keeps its
+    draft on failure and can simply retry."""
     body = request.get_json(force=True, silent=True) or {}
     if not body.get("fullName"):
         raise ApiError("fullName is required", 400)
     validate_patient_dates(body)
+
+    fingerprints = body.get("fingerprintTemplates")
+    decoded_fingerprints = []
+    if fingerprints is not None:
+        if not isinstance(fingerprints, list) or len(fingerprints) != 10:
+            raise ApiError("fingerprintTemplates must list all 10 fingers", 400)
+        positions = [t.get("finger_position") if isinstance(t, dict) else None for t in fingerprints]
+        if sorted(p or "" for p in positions) != sorted(FINGER_POSITIONS):
+            raise ApiError("fingerprintTemplates must hold each of R1-R5 and L1-L5 once", 400)
+        decoded_fingerprints = [(t["finger_position"], decode_template(t.get("template_data"))) for t in fingerprints]
+    fingerprint_device = body.get("fingerprintDeviceId") or "unknown"
+    iris_command_ids = body.get("irisCommandIds")
+    if iris_command_ids is not None and (
+            not isinstance(iris_command_ids, list) or len(iris_command_ids) != 2
+            or not all(isinstance(c, int) for c in iris_command_ids)):
+        raise ApiError("irisCommandIds must be the two iris_enroll command ids", 400)
 
     if body.get("id"):
         lifelink_id = body["id"]
@@ -479,31 +655,59 @@ def create_patient():
     else:
         lifelink_id = gen_lifelink_id(body.get("gender"))
 
-    photo_path = None
-    if body.get("photoDataUrl"):
-        photo_path = save_photo_data_url(lifelink_id, body["photoDataUrl"])
+    photo_file = None
+    patient_uuid = None
+    try:
+        photo_path = None
+        if body.get("photoDataUrl"):
+            photo_path = save_photo_data_url(lifelink_id, body["photoDataUrl"])
+            photo_file = UPLOADS_DIR / Path(photo_path).name
 
-    insert_res = (
-        supabase.table("patients")
-        .insert({
-            "lifelink_id": lifelink_id,
-            "full_name": body["fullName"],
-            "date_of_birth": parse_date_or_none(body.get("dob"), "dob"),
-            "gender": body.get("gender") or "",
-            "blood_group": body.get("bloodGroup") or "",
-            "phone": body.get("phone") or "",
-            "email": body.get("email") or "",
-            "address": body.get("address") or "",
-            "national_id": body.get("nationalId") or "",
-            "emergency_notes": body.get("emergencyNotes") or "",
-            "photo_path": photo_path,
-        })
-        .execute()
-    )
-    patient_row = insert_res.data[0]
-    write_related_rows(patient_row["patient_id"], body)
+        insert_res = (
+            supabase.table("patients")
+            .insert({
+                "lifelink_id": lifelink_id,
+                "full_name": body["fullName"],
+                "date_of_birth": parse_date_or_none(body.get("dob"), "dob"),
+                "gender": body.get("gender") or "",
+                "blood_group": body.get("bloodGroup") or "",
+                "phone": body.get("phone") or "",
+                "email": body.get("email") or "",
+                "address": body.get("address") or "",
+                "national_id": body.get("nationalId") or "",
+                "emergency_notes": body.get("emergencyNotes") or "",
+                "photo_path": photo_path,
+            })
+            .execute()
+        )
+        patient_uuid = insert_res.data[0]["patient_id"]
+        write_related_rows(patient_uuid, body)
 
-    return jsonify(assemble_patient(get_patient_row_by_lifelink_id(lifelink_id))), 201
+        # Biometrics: one local transaction for fingerprints + iris.
+        with local_db_cursor() as cur:
+            if decoded_fingerprints:
+                upsert_templates(cur, lifelink_id, fingerprint_device, decoded_fingerprints)
+            if iris_command_ids:
+                link_iris_templates(cur, lifelink_id, iris_command_ids)
+        record = assemble_patient(get_patient_row_by_lifelink_id(lifelink_id))
+    except Exception:
+        # Undo: the Supabase row (child rows cascade) and the photo file.
+        if patient_uuid:
+            try:
+                supabase.table("patients").delete().eq("patient_id", patient_uuid).execute()
+            except Exception as err:
+                app.logger.error("Rollback of patient %s failed: %s", lifelink_id, err)
+        if photo_file:
+            photo_file.unlink(missing_ok=True)
+        raise
+
+    try:
+        cache_patient(record)
+    except psycopg2.Error as err:
+        app.logger.warning("Could not cache patient %s: %s", lifelink_id, err)
+    record["fingerprintsStored"] = len(decoded_fingerprints)
+    record["irisStored"] = 2 if iris_command_ids else 0
+    return jsonify(record), 201
 
 
 @app.route("/api/patients/<lifelink_id>", methods=["PUT"])
@@ -542,7 +746,7 @@ def update_patient(lifelink_id):
         merged = {**current, **partial}
         write_related_rows(row["patient_id"], merged)
 
-    return jsonify(assemble_patient(get_patient_row_by_lifelink_id(lifelink_id)))
+    return jsonify(cache_patient(assemble_patient(get_patient_row_by_lifelink_id(lifelink_id))))
 
 
 # --------------------------------------------------------------- records --
@@ -551,7 +755,7 @@ def update_patient(lifelink_id):
 def list_records(lifelink_id):
     row = get_patient_row_by_lifelink_id(lifelink_id)
     category = request.args.get("category")
-    q = (request.args.get("q") or "").strip()
+    q = safe_search_term(request.args.get("q") or "")
 
     query = supabase.table("clinical_records").select("*").eq("patient_id", row["patient_id"])
     if category and category != "All":
@@ -650,9 +854,19 @@ def create_device_command(device_id):
     if mode in ("verify", "iris_verify"):
         if not patient_id:
             raise ApiError(f"patient_id is required for {mode} commands", 400)
-        get_patient_row_by_lifelink_id(patient_id)
+        # Checked against the local template tables, not Supabase, so a
+        # scan still works while the internet is down.
+        if mode == "verify" and not patient_has_fingerprint_templates(patient_id):
+            raise ApiError("This patient has no enrolled fingerprints", 409)
         if mode == "iris_verify" and not patient_has_iris_templates(patient_id):
             raise ApiError("This patient has no enrolled iris templates", 409)
+    elif mode == "identify":
+        # 1:N search, no patient id: `finger` (R1..L5) is searched first
+        # across every patient, then the other fingers.
+        finger = body.get("finger") or None
+        if finger is not None and finger not in FINGER_POSITIONS:
+            raise ApiError(f"finger must be one of {list(FINGER_POSITIONS)}", 400)
+        params = {"finger": finger}
     elif mode == "iris_enroll":
         eye_side = body.get("eye_side")
         if eye_side not in IRIS_EYE_SIDES:
@@ -674,9 +888,16 @@ def create_device_command(device_id):
             {"finger_position": t["finger_position"], "template_data": t["template_data"]} for t in exclude
         ]}
 
+    if mode in FINGERPRINT_MODES and not device_online(device_id):
+        raise ApiError("FINGERPRINT_DEVICE_OFFLINE", 503)
+
     with local_db_cursor() as cur:
         if mode in CAMERA_MODES:
             close_active_iris_commands(cur, device_id, "superseded", only_expired=False)
+        else:
+            # The reader serves one request at a time, oldest first: a request
+            # the GUI already gave up on must never take the next finger.
+            close_fingerprint_commands(cur, device_id, "superseded")
         cur.execute(
             """
             INSERT INTO device_commands (device_id, mode, patient_id, status, params)
@@ -695,8 +916,9 @@ def get_pending_device_command(device_id):
     """Polled by the device. Atomically claims (pending -> in_progress) and
     returns the oldest queued command for this device, or 204 if none.
     FOR UPDATE SKIP LOCKED means two concurrent pollers can never claim the
-    same row."""
+    same row. Expired requests are closed first so they are never claimed."""
     with local_db_cursor() as cur:
+        expire_fingerprint_commands(cur, device_id)
         cur.execute(
             """
             UPDATE device_commands
@@ -720,7 +942,10 @@ def get_pending_device_command(device_id):
 
 @app.route("/api/devices/<device_id>/commands/<int:command_id>", methods=["GET"])
 def get_device_command(device_id, command_id):
+    """The GUI's poll. A captured enroll template is handed out once and then
+    removed from the row, so no plaintext template stays in the database."""
     with local_db_cursor() as cur:
+        expire_fingerprint_commands(cur, device_id)
         cur.execute(
             """
             SELECT id, device_id, mode, patient_id, status, result, created_at, updated_at
@@ -729,9 +954,20 @@ def get_device_command(device_id, command_id):
             (device_id, command_id),
         )
         row = cur.fetchone()
-    if not row:
-        raise ApiError("Command not found", 404)
-    return jsonify(dict(row))
+        if not row:
+            raise ApiError("Command not found", 404)
+        row = dict(row)
+        result = row.get("result")
+        if isinstance(result, dict) and result.get("template_data"):
+            cur.execute(
+                """
+                UPDATE device_commands
+                SET result = (result - 'template_data') || '{"template_collected": true}'::jsonb
+                WHERE id = %s
+                """,
+                (command_id,),
+            )
+    return jsonify(row)
 
 
 @app.route("/api/devices/<device_id>/commands/<int:command_id>/result", methods=["POST"])
@@ -743,31 +979,39 @@ def post_device_command_result(device_id, command_id):
     if status not in ("done", "error"):
         raise ApiError("status must be 'done' or 'error'", 400)
 
+    result = body.get("result")
     with local_db_cursor() as cur:
+        if status == "done" and isinstance(result, dict) and result.get("patient_id"):
+            # identify: the reader names the matched patient; it must be one
+            # whose templates it was actually given.
+            if not patient_has_fingerprint_templates(result["patient_id"]):
+                raise ApiError("identify result names a patient with no templates", 400)
         cur.execute(
             """
             UPDATE device_commands
-            SET status = %s, result = %s, updated_at = now()
-            WHERE id = %s AND device_id = %s
-            RETURNING id, device_id, mode, patient_id, status, result, created_at, updated_at
+            SET status = %s, result = %s, params = NULL, updated_at = now()
+            WHERE id = %s AND device_id = %s AND status IN ('pending', 'in_progress')
+            RETURNING id, device_id, mode, patient_id, status, created_at, updated_at
             """,
-            (status, psycopg2.extras.Json(body.get("result")), command_id, device_id),
+            (status, psycopg2.extras.Json(result), command_id, device_id),
         )
         row = cur.fetchone()
     if not row:
-        raise ApiError("Command not found", 404)
+        # Unknown, or already closed (cancelled / expired / superseded):
+        # 409 tells the device to drop the result instead of retrying.
+        raise ApiError("Command not found or no longer open", 409)
     return jsonify(dict(row))
 
 
 @app.route("/api/devices/<device_id>/commands/<int:command_id>/cancel", methods=["POST"])
 def cancel_device_command(device_id, command_id):
-    """The GUI gave up on a command (e.g. "skip iris for now"). Ends it if
-    still open, so the camera stops scanning for it."""
+    """The GUI gave up on a command (timeout, "skip iris", left the page).
+    Ends it if still open, so the device never works on it."""
     with local_db_cursor() as cur:
         cur.execute(
             """
             UPDATE device_commands
-            SET status = 'error', result = %s, updated_at = now()
+            SET status = 'error', result = %s, params = NULL, updated_at = now()
             WHERE id = %s AND device_id = %s AND status IN ('pending', 'in_progress')
             """,
             (psycopg2.extras.Json({"error": "cancelled"}), command_id, device_id),
@@ -793,6 +1037,64 @@ def post_device_command_progress(device_id, command_id):
     if not row:
         raise ApiError("Command not found or not in progress", 404)
     return "", 204
+
+
+# A fingerprint request nobody claimed within this time is dropped (the GUI
+# stops waiting after 3 minutes). A claimed one must show progress: the
+# device posts a step at least every ~25 s (finger wait is 20 s), so a
+# silent one means the device lost power or WiFi mid-scan.
+FP_PENDING_TTL = "3 minutes"
+FP_SILENT_TTL = "90 seconds"
+# The ESP32 polls about once a second while idle; a busy one reports
+# progress. Silence longer than this means it is off or off the network.
+DEVICE_ONLINE_SECONDS = 15
+
+
+def device_online(device_id):
+    seen = device_last_seen.get(device_id)
+    return seen is not None and time.monotonic() - seen < DEVICE_ONLINE_SECONDS
+
+
+def close_fingerprint_commands(cur, device_id, error):
+    cur.execute(
+        """
+        UPDATE device_commands
+        SET status = 'error', result = %s, params = NULL, updated_at = now()
+        WHERE device_id = %s AND mode IN %s AND status IN ('pending', 'in_progress')
+        """,
+        (psycopg2.extras.Json({"error": error}), device_id, FINGERPRINT_MODES),
+    )
+
+
+def expire_fingerprint_commands(cur, device_id):
+    cur.execute(
+        f"""
+        UPDATE device_commands
+        SET status = 'error', params = NULL, updated_at = now(),
+            result = CASE WHEN status = 'pending' THEN '{{"error": "expired"}}'::jsonb
+                          ELSE '{{"error": "device_lost"}}'::jsonb END
+        WHERE device_id = %s AND mode IN %s
+          AND ((status = 'pending' AND created_at < now() - interval '{FP_PENDING_TTL}')
+            OR (status = 'in_progress' AND updated_at < now() - interval '{FP_SILENT_TTL}'))
+        """,
+        (device_id, FINGERPRINT_MODES),
+    )
+
+
+def patient_has_fingerprint_templates(lifelink_id):
+    with local_db_cursor() as cur:
+        cur.execute("SELECT 1 FROM fingerprint_templates WHERE patient_id = %s LIMIT 1", (lifelink_id,))
+        return cur.fetchone() is not None
+
+
+@app.route("/api/devices/status", methods=["GET"])
+def devices_status():
+    """Which devices have called in recently (for the GUI's online dots)."""
+    now = time.monotonic()
+    return jsonify({
+        device_id: {"online": now - seen < DEVICE_ONLINE_SECONDS, "last_seen_seconds": round(now - seen, 1)}
+        for device_id, seen in device_last_seen.items()
+    })
 
 
 def decode_template(template_data):
@@ -891,8 +1193,7 @@ def enroll_fingerprint():
 def get_patient_templates(lifelink_id):
     """The patient's decrypted templates. The sensor stores nothing
     permanently: the device loads each one into a scratch slot and runs the
-    1:1 match on-chip against a live capture."""
-    get_patient_row_by_lifelink_id(lifelink_id)
+    1:1 match on-chip against a live capture. Local only (works offline)."""
     with local_db_cursor() as cur:
         cur.execute(
             """
@@ -904,12 +1205,60 @@ def get_patient_templates(lifelink_id):
             (TEMPLATE_ENCRYPTION_KEY, lifelink_id),
         )
         rows = cur.fetchall()
+    if not rows:
+        raise ApiError(f"No fingerprints enrolled for {lifelink_id}", 404)
     return jsonify([{
         "finger_position": r["finger_position"],
         "device_id": r["device_id"],
         "device_slot": r["device_slot"],
         "template_data": base64.b64encode(bytes(r["template_data"])).decode(),
     } for r in rows])
+
+
+# Search order for "any finger": the fingers an operator most often presents.
+FINGER_SEARCH_ORDER = ("R2", "L2", "R1", "L1", "R3", "L3", "R4", "L4", "R5", "L5")
+MAX_CANDIDATE_PAGE = 30
+
+
+@app.route("/api/fingerprint/candidates", methods=["GET"])
+def get_fingerprint_candidates():
+    """Identify (1:N) without a patient id: the reader turns one live scan
+    into a template, then compares every stored template against it on-chip
+    (Verify1_1_Template, ~75 ms each), fetching them a page at a time so its
+    RAM stays small. `finger` is searched first across all patients, then
+    the remaining fingers. Order is stable, so offset paging is safe."""
+    finger = request.args.get("finger") or None
+    if finger is not None and finger not in FINGER_POSITIONS:
+        raise ApiError(f"finger must be one of {list(FINGER_POSITIONS)}", 400)
+    try:
+        offset = max(int(request.args.get("offset", 0)), 0)
+        limit = min(max(int(request.args.get("limit", 20)), 1), MAX_CANDIDATE_PAGE)
+    except ValueError:
+        raise ApiError("offset and limit must be integers", 400)
+    order = ([finger] if finger else []) + [f for f in FINGER_SEARCH_ORDER if f != finger]
+    with local_db_cursor() as cur:
+        cur.execute("SELECT count(*) AS n FROM fingerprint_templates")
+        total = cur.fetchone()["n"]
+        cur.execute(
+            """
+            SELECT patient_id, finger_position,
+                   pgp_sym_decrypt_bytea(template_data, %s) AS template_data
+            FROM fingerprint_templates
+            ORDER BY array_position(%s::text[], finger_position), patient_id
+            OFFSET %s LIMIT %s
+            """,
+            (TEMPLATE_ENCRYPTION_KEY, order, offset, limit),
+        )
+        rows = cur.fetchall()
+    return jsonify({
+        "total": total,
+        "offset": offset,
+        "items": [{
+            "patient_id": r["patient_id"],
+            "finger_position": r["finger_position"],
+            "template_data": base64.b64encode(bytes(r["template_data"])).decode(),
+        } for r in rows],
+    })
 
 
 @app.route("/api/verify", methods=["POST"])
@@ -921,7 +1270,8 @@ def verify_fingerprint():
     lifelink_id = body.get("patient_id")
     if not lifelink_id:
         raise ApiError("patient_id is required", 400)
-    get_patient_row_by_lifelink_id(lifelink_id)
+    if not patient_has_fingerprint_templates(lifelink_id):
+        raise ApiError(f"No fingerprints enrolled for {lifelink_id}", 404)
 
     return jsonify({
         "match": bool(body.get("match")),
@@ -1237,11 +1587,31 @@ def post_capture():
         return capture_answer(cur, capture_id, device_id, command["id"], "SUCCESS")
 
 
+def link_iris_templates(cur, lifelink_id, command_ids):
+    """Links a registration's two captured eyes (their iris_enroll command
+    ids) to the patient, inside the caller's transaction. Replaces any iris
+    templates the patient already had."""
+    cur.execute(
+        """
+        SELECT id, eye_side FROM iris_templates
+        WHERE command_id = ANY(%s) AND patient_id IS NULL
+        FOR UPDATE
+        """,
+        (command_ids,),
+    )
+    rows = cur.fetchall()
+    if sorted(r["eye_side"] for r in rows) != ["left", "right"]:
+        raise ApiError("The iris scans have expired or were already used; scan both eyes again", 409)
+    cur.execute("DELETE FROM iris_templates WHERE patient_id = %s", (lifelink_id,))
+    cur.execute(
+        "UPDATE iris_templates SET patient_id = %s WHERE id = ANY(%s)",
+        (lifelink_id, [r["id"] for r in rows]),
+    )
+
+
 @app.route("/api/patients/<lifelink_id>/iris-templates", methods=["POST"])
 def link_patient_iris_templates(lifelink_id):
-    """Links a registration's two captured eyes ({command_ids: [...]}, from
-    their iris_enroll commands) to the newly created patient, in one
-    transaction. Replaces any iris templates the patient already had."""
+    """Re-enrolls an existing patient's iris ({command_ids: [od, os]})."""
     body = request.get_json(force=True, silent=True) or {}
     command_ids = body.get("command_ids")
     if (not isinstance(command_ids, list) or len(command_ids) != 2
@@ -1250,30 +1620,242 @@ def link_patient_iris_templates(lifelink_id):
 
     get_patient_row_by_lifelink_id(lifelink_id)
     with local_db_cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, eye_side FROM iris_templates
-            WHERE command_id = ANY(%s) AND patient_id IS NULL
-            FOR UPDATE
-            """,
-            (command_ids,),
-        )
-        rows = cur.fetchall()
-        if sorted(r["eye_side"] for r in rows) != ["left", "right"]:
-            raise ApiError("Need one captured, not yet linked template for each eye; re-capture the iris", 409)
-        cur.execute("DELETE FROM iris_templates WHERE patient_id = %s", (lifelink_id,))
-        cur.execute(
-            "UPDATE iris_templates SET patient_id = %s WHERE id = ANY(%s)",
-            (lifelink_id, [r["id"] for r in rows]),
-        )
+        link_iris_templates(cur, lifelink_id, command_ids)
     return jsonify({"patient_id": lifelink_id, "stored": 2, "eye_sides": ["left", "right"]}), 201
 
 
+# ------------------------------------------------------------ audit log --
+# Operator actions, hash-chained in the local Postgres (was browser
+# localStorage, which any page script could edit or clear).
+AUDIT_GENESIS = "0" * 64
+audit_lock = threading.Lock()
+
+
+def audit_hash(prev_hash, occurred_at, event, detail):
+    return hashlib.sha256(f"{prev_hash}|{occurred_at}|{event}|{detail}".encode()).hexdigest()
+
+
+@app.route("/api/audit", methods=["POST"])
+def add_audit_event():
+    body = request.get_json(force=True, silent=True) or {}
+    event = str(body.get("event") or "").strip()[:64]
+    detail = str(body.get("detail") or "")[:2000]
+    if not event:
+        raise ApiError("event is required", 400)
+    with audit_lock, local_db_cursor() as cur:
+        cur.execute("SELECT entry_hash FROM audit_events ORDER BY id DESC LIMIT 1")
+        last = cur.fetchone()
+        prev_hash = last["entry_hash"] if last else AUDIT_GENESIS
+        cur.execute("SELECT now() AS t")
+        occurred_at = cur.fetchone()["t"]
+        entry_hash = audit_hash(prev_hash, occurred_at.isoformat(), event, detail)
+        cur.execute(
+            """
+            INSERT INTO audit_events (occurred_at, event, detail, prev_hash, entry_hash)
+            VALUES (%s, %s, %s, %s, %s) RETURNING id, occurred_at
+            """,
+            (occurred_at, event, detail, prev_hash, entry_hash),
+        )
+        row = cur.fetchone()
+    return jsonify({"id": row["id"], "timestamp": row["occurred_at"].isoformat(),
+                    "event": event, "detail": detail}), 201
+
+
+@app.route("/api/audit", methods=["GET"])
+def list_audit_events():
+    limit = min(max(int(request.args.get("limit", 50)), 1), 500)
+    with local_db_cursor() as cur:
+        cur.execute("SELECT id, occurred_at, event, detail FROM audit_events ORDER BY id DESC LIMIT %s", (limit,))
+        rows = cur.fetchall()
+    return jsonify([{"id": r["id"], "timestamp": r["occurred_at"].isoformat(),
+                     "event": r["event"], "detail": r["detail"]} for r in rows])
+
+
+def verify_audit_chain(cur):
+    cur.execute("SELECT id, occurred_at, event, detail, prev_hash, entry_hash FROM audit_events ORDER BY id")
+    prev = AUDIT_GENESIS
+    count = 0
+    for r in cur:
+        count += 1
+        if r["prev_hash"] != prev or r["entry_hash"] != audit_hash(
+                r["prev_hash"], r["occurred_at"].isoformat(), r["event"], r["detail"]):
+            return {"ok": False, "entries": count, "broken_at": r["id"]}
+        prev = r["entry_hash"]
+    return {"ok": True, "entries": count}
+
+
+# ------------------------------------------------------- system checks --
+# Real checks for the Settings page (it used to show timer-driven fakes).
+
+@app.route("/api/system/status", methods=["GET"])
+def system_status():
+    status = {}
+    started = time.monotonic()
+    try:
+        supabase.table("patients").select("patient_id").limit(1).execute()
+        status["cloud"] = {"ok": True, "ms": round((time.monotonic() - started) * 1000)}
+    except Exception as err:
+        status["cloud"] = {"ok": False, "error": type(err).__name__}
+    try:
+        with local_db_cursor() as cur:
+            cur.execute("SELECT count(*) AS n FROM fingerprint_templates")
+            fingerprints = cur.fetchone()["n"]
+            cur.execute("SELECT count(DISTINCT patient_id) AS n FROM fingerprint_templates")
+            fp_patients = cur.fetchone()["n"]
+            cur.execute("SELECT count(*) AS n FROM iris_templates WHERE patient_id IS NOT NULL")
+            iris = cur.fetchone()["n"]
+            cur.execute("SELECT count(*) AS n FROM patient_cache")
+            cached = cur.fetchone()["n"]
+        status["local_db"] = {"ok": True, "fingerprint_templates": fingerprints,
+                              "fingerprint_patients": fp_patients, "iris_templates": iris,
+                              "cached_patients": cached}
+    except psycopg2.Error as err:
+        status["local_db"] = {"ok": False, "error": str(err).splitlines()[0]}
+    try:
+        with urlrequest.urlopen(f"{IRIS_ENGINE_URL}/health", timeout=3) as resp:
+            status["iris_engine"] = {"ok": resp.status == 200}
+    except Exception as err:
+        status["iris_engine"] = {"ok": False, "error": type(err).__name__}
+    now = time.monotonic()
+    status["devices"] = {d: {"online": now - t < DEVICE_ONLINE_SECONDS, "last_seen_seconds": round(now - t, 1)}
+                         for d, t in device_last_seen.items()}
+    return jsonify(status)
+
+
+@app.route("/api/system/integrity", methods=["GET"])
+def system_integrity():
+    """Decrypts every stored template (proves the key matches and nothing is
+    corrupt) and re-walks the audit hash chain."""
+    report = {}
+    with local_db_cursor() as cur:
+        cur.execute(
+            """
+            SELECT count(*) AS n,
+                   count(*) FILTER (WHERE length(pgp_sym_decrypt_bytea(template_data, %s)) = %s) AS ok
+            FROM fingerprint_templates
+            """,
+            (TEMPLATE_ENCRYPTION_KEY, GT521_TEMPLATE_SIZE),
+        )
+        row = cur.fetchone()
+        report["fingerprint_templates"] = {"total": row["n"], "valid": row["ok"]}
+        cur.execute("SELECT count(*) AS n FROM iris_templates WHERE patient_id IS NOT NULL "
+                    "AND length(pgp_sym_decrypt_bytea(template_data, %s)) > 0", (TEMPLATE_ENCRYPTION_KEY,))
+        report["iris_templates_valid"] = cur.fetchone()["n"]
+        cur.execute("SELECT count(*) AS n FROM device_commands WHERE result ? 'template_data' OR params IS NOT NULL "
+                    "AND status IN ('done', 'error')")
+        report["plaintext_template_copies"] = cur.fetchone()["n"]
+        report["audit_chain"] = verify_audit_chain(cur)
+    return jsonify(report)
+
+
+# --------------------------------------------------- registration draft --
+# The registration in progress (up to 30 finger scans, 2 eyes, a photo),
+# kept in this process's memory so a page reload, a kiosk crash or an
+# accidental swipe-back doesn't lose it. Never written to disk: it holds
+# plaintext templates. Dropped after DRAFT_MAX_AGE_SECONDS of no changes.
+DRAFT_MAX_AGE_SECONDS = 2 * 60 * 60
+registration_draft = {"data": None, "updated": 0.0}
+
+
+@app.route("/api/draft", methods=["GET"])
+def get_draft():
+    if registration_draft["data"] is None or time.monotonic() - registration_draft["updated"] > DRAFT_MAX_AGE_SECONDS:
+        registration_draft["data"] = None
+        return "", 204
+    return jsonify(registration_draft["data"])
+
+
+@app.route("/api/draft", methods=["PUT"])
+def put_draft():
+    if request.content_length and request.content_length > 8 * 1024 * 1024:
+        raise ApiError("draft too large", 413)
+    body = request.get_json(force=True, silent=True)
+    if not isinstance(body, dict):
+        raise ApiError("draft must be a JSON object", 400)
+    registration_draft.update(data=body, updated=time.monotonic())
+    return "", 204
+
+
+@app.route("/api/draft", methods=["DELETE"])
+def delete_draft():
+    registration_draft.update(data=None, updated=0.0)
+    return "", 204
+
+
+# ------------------------------------------------------------- fonts --
+# Geist + Material Symbols are served from here, not Google Fonts, so the
+# icons and text render on a kiosk without internet.
+
+@app.route("/fonts/<path:filename>")
+def font_file(filename):
+    return send_from_directory(PROJECT_ROOT / "fonts", filename, max_age=7 * 24 * 3600)
+
+
+# ------------------------------------------------------- local schema --
+
+def prepare_local_db():
+    """Applies backend/local_schema.sql and removes plaintext template copies
+    left in device_commands by earlier versions (enroll results, the
+    duplicate-check params) plus week-old finished commands."""
+    with local_db_cursor() as cur:
+        cur.execute((BASE_DIR / "local_schema.sql").read_text())
+        cur.execute("UPDATE device_commands SET params = NULL WHERE params IS NOT NULL AND status IN ('done', 'error')")
+        cur.execute(
+            """
+            UPDATE device_commands
+            SET result = (result - 'template_data') || '{"template_collected": true}'::jsonb
+            WHERE result ? 'template_data' AND status IN ('done', 'error')
+            """
+        )
+        scrubbed = cur.rowcount
+        cur.execute("DELETE FROM device_commands WHERE created_at < now() - interval '7 days' "
+                    "AND status IN ('done', 'error')")
+        purged = cur.rowcount
+    if scrubbed or purged:
+        print(f" Local DB: removed {scrubbed} plaintext template copies, {purged} old device commands")
+
+
+# ------------------------------------------------------- device discovery --
+# The ESP32 fingerprint device doesn't hard-code this machine's IP (it changes
+# with every WiFi network / hotspot). On boot, and whenever requests start
+# failing, it broadcasts DISCOVERY_REQUEST on the LAN; we answer with our port
+# and the device takes our IP from the reply's source address.
+DISCOVERY_PORT = int(os.environ.get("DISCOVERY_PORT", 37020))
+DISCOVERY_REQUEST = b"LIFELINK_DISCOVER"
+
+
+def run_discovery_responder():
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("0.0.0.0", DISCOVERY_PORT))
+    except OSError as exc:
+        print(f" Device discovery disabled (UDP {DISCOVERY_PORT}): {exc}")
+        return
+    print(f" Device discovery listening on UDP {DISCOVERY_PORT}")
+    while True:
+        try:
+            data, addr = sock.recvfrom(256)
+            if data.strip() == DISCOVERY_REQUEST:
+                sock.sendto(f"LIFELINK_BACKEND {PORT}".encode(), addr)
+        except OSError:
+            continue
+
+
 if __name__ == "__main__":
+    import threading
+
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    prepare_local_db()
+    if not DEVICE_API_KEYS:
+        print(" WARNING: DEVICE_API_KEYS is empty in backend/.env -- the fingerprint reader and")
+        print("          the iris camera will be refused (401) until their keys are added.")
     print("=" * 50)
     print(" LifeLink Backend (Flask + Supabase)")
     print(f" Serving app + API at: http://localhost:{PORT}")
+    threading.Thread(target=run_discovery_responder, name="device-discovery", daemon=True).start()
     print("=" * 50)
     # Werkzeug debugger allows remote code execution; only enable explicitly.
     app.run(host="0.0.0.0", port=PORT, debug=os.environ.get("FLASK_DEBUG") == "1", use_reloader=False)

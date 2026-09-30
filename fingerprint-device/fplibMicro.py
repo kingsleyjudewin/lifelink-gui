@@ -395,6 +395,20 @@ class Fingerprint:
         """1:1 match of the last CaptureFinger image against `slot`."""
         return self.command(CMD_VERIFY, slot, timeout_ms=5000)[0]
 
+    def verify_template(self, slot, template):
+        """1:1 match of an uploaded 498-byte template against `slot`
+        (Verify1_1_Template). Needs no captured image, so a single live
+        capture (MakeTemplate) can be compared against any number of stored
+        templates without the finger staying on the sensor."""
+        if len(template) != TEMPLATE_SIZE:
+            self.last_error = "bad_template_size"
+            return False
+        ack, _ = self.command(CMD_VERIFY_TEMPLATE, slot)
+        if not ack:
+            return False
+        self._write_data(template)
+        return self._read_response(5000)[0]
+
     def delete(self, slot=None):
         if slot is None:
             return self.command(CMD_DELETE_ALL)[0]

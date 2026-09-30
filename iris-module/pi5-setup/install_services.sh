@@ -17,7 +17,7 @@ After=network.target
 [Service]
 User=$RUN_AS
 WorkingDirectory=$REPO/iris-module/engine
-ExecStart=$REPO/iris-module/engine/.venv/bin/python iris_service.py
+ExecStart="$REPO/iris-module/engine/.venv/bin/python" iris_service.py
 Restart=on-failure
 
 [Install]
@@ -33,7 +33,7 @@ Wants=network-online.target
 [Service]
 User=$RUN_AS
 WorkingDirectory=$REPO/backend
-ExecStart=$REPO/backend/.venv/bin/python app.py
+ExecStart="$REPO/backend/.venv/bin/python" app.py
 Restart=on-failure
 
 [Install]

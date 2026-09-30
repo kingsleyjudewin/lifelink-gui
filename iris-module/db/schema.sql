@@ -34,7 +34,7 @@ create index if not exists idx_iris_templates_command_id on iris_templates(comma
 -- camera's command modes too (iris scans and the patient photo).
 alter table device_commands drop constraint if exists device_commands_mode_check;
 alter table device_commands add constraint device_commands_mode_check
-  check (mode in ('enroll', 'verify', 'iris_enroll', 'iris_verify', 'photo_capture'));
+  check (mode in ('enroll', 'verify', 'identify', 'iris_enroll', 'iris_verify', 'photo_capture'));
 
 -- One row per Pi Zero capture that got a final answer (SUCCESS/RESCAN), so
 -- a capture resent after a lost response gets the same answer instead of

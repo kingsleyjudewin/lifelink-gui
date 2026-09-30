@@ -1,12 +1,22 @@
 # Copy this file to config.py on the device and fill in real values.
 # config.py is gitignored -- never commit WiFi credentials or API keys.
 
-WIFI_SSID = "your-wifi-ssid"
-WIFI_PASSWORD = "your-wifi-password"
+# Known WiFi networks, tried strongest-first among the ones in range -- add a
+# network here once and the device joins it without editing anything else.
+# SSIDs are case-sensitive (and may contain trailing spaces).
+WIFI_NETWORKS = [
+    ("your-wifi-ssid", "your-wifi-password"),
+    ("your-phone-hotspot", "hotspot-password"),
+]
 
+# The backend's address is found automatically: the device broadcasts on
+# DISCOVERY_PORT and the backend (backend/app.py) replies. The result is cached
+# on the device, so a new laptop/Pi IP never needs a reflash.
+DISCOVERY_PORT = 37020
+# Last-resort fallback only, used if discovery gets no answer.
 BACKEND_BASE_URL = "http://192.168.1.50:3000"  # no trailing slash
 DEVICE_ID = "dev-esp32-1"
-API_KEY = "replace-with-device-api-key"  # sent once backend auth (build-order step 8) exists
+API_KEY = "replace-with-device-api-key"  # must match dev-esp32-1 in DEVICE_API_KEYS (backend/.env)
 
 # UART2 (GPIO16=RX2, GPIO17=TX2 by default on classic ESP32) -- NOT UART0,
 # which is the same UART the USB-serial chip uses for the REPL/this console.

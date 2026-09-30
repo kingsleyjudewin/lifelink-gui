@@ -28,6 +28,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import logging
 import secrets
 import subprocess
@@ -58,6 +59,8 @@ class IrisCameraClient:
         self.hosts = args.host or DEFAULT_HOSTS
         self.port = args.port
         self.device_id = args.device_id
+        # This camera's key, as listed in DEVICE_API_KEYS in the Pi 5's backend/.env.
+        self.api_key = args.api_key or os.environ.get("LIFELINK_API_KEY", "")
         self.camera_backend = args.camera
         self.source = args.source
         self.max_frames = args.max_frames
@@ -79,7 +82,7 @@ class IrisCameraClient:
     def _request(self, method, url, payload=None, timeout=10):
         data = json.dumps(payload).encode() if payload is not None else None
         req = urlrequest.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json", "X-API-Key": self.api_key})
         with urlrequest.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
 
@@ -261,6 +264,15 @@ class IrisCameraClient:
                 except Exception as err:  # camera missing / unplugged
                     logger.error("Camera error: %s; retrying in 3 s", err)
                     time.sleep(3)
+                    # Stop retrying once the request is gone (expired or
+                    # cancelled in the GUI) instead of looping forever.
+                    try:
+                        still_wanted = self.health(self.base_url).get("ready")
+                    except NETWORK_ERRORS + (ValueError,):
+                        still_wanted = True
+                    if not still_wanted:
+                        logger.info("Request no longer active; waiting for the next one")
+                        break
                     continue
                 self.capture_counter += 1
                 capture_id = f"CAPTURE-{self.boot_token}-{self.capture_counter:04d}"
@@ -281,6 +293,7 @@ def main():
                         help="Pi 5 host to try (repeatable). Default: main-pi.local, then 192.168.50.1")
     parser.add_argument("--port", type=int, default=3000, help="LifeLink backend port on the Pi 5")
     parser.add_argument("--device-id", default="iris-cam-1", help="Must match IRIS_DEVICE_ID in index.html")
+    parser.add_argument("--api-key", help="This camera's key (default: $LIFELINK_API_KEY)")
     parser.add_argument("--camera", default="opencv_video", choices=["opencv_video", "picamera2"])
     parser.add_argument("--source", default="0", help="Webcam index, video file or image (opencv_video only)")
     parser.add_argument("--max-frames", type=int, default=30, help="Frames examined per scan")

@@ -7,6 +7,11 @@ set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run with sudo"; exit 1; }
 DIR=$(cd "$(dirname "$0")" && pwd)
 RUN_AS=${SUDO_USER:?run via sudo from your normal user}
+# This camera's key: the iris-cam-1 entry of DEVICE_API_KEYS in the Pi 5's backend/.env.
+read -rsp "Camera API key (iris-cam-1 in the Pi 5's DEVICE_API_KEYS): " API_KEY; echo
+[ -n "$API_KEY" ] || { echo "a key is required"; exit 1; }
+install -m 600 -o "$RUN_AS" /dev/null /etc/lifelink-camera.env
+echo "LIFELINK_API_KEY=$API_KEY" > /etc/lifelink-camera.env
 
 apt-get install -y python3-opencv python3-numpy python3-picamera2
 
@@ -24,7 +29,8 @@ Wants=network-online.target
 [Service]
 User=$RUN_AS
 WorkingDirectory=$DIR
-ExecStart=/usr/bin/python3 $DIR/camera_client.py --camera picamera2
+EnvironmentFile=/etc/lifelink-camera.env
+ExecStart=/usr/bin/python3 "$DIR/camera_client.py" --camera picamera2
 Restart=on-failure
 RestartSec=3
 

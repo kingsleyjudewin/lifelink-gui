@@ -6,10 +6,15 @@ scratch slot, reads the merged 498-byte template back, wipes the slot, and
 ships the template to the backend. VERIFY loads each of the claimed
 patient's stored templates into a scratch slot (SetTemplate), captures one
 live scan, runs the on-chip 1:1 match (Verify1_1) against each slot, and
-wipes the scratch slots again afterwards.
+wipes the scratch slots again afterwards. IDENTIFY (1:N, no patient id)
+captures once, turns the scan into a template (MakeTemplate) held in the
+scratch slot, and streams every stored template from the backend through
+Verify1_1_Template against it (~75 ms each) until one matches. Identify1_N
+is not used: it gives false matches on this sensor.
 """
 
 import ubinascii
+import utime
 
 import config
 import device_api
@@ -159,3 +164,70 @@ def verify_mode(fp, patient_id):
     if result is None:
         return {"ok": False, "error": "backend_unreachable"}
     return {"match": match, "confidence": confidence, "finger_position": matched_position}
+
+
+IDENTIFY_PAGE = 20
+
+
+def identify_mode(fp, finger=None, on_progress=None):
+    """finger: R1..L5 searched first across all patients (None = any).
+    Returns {ok, match, patient_id, finger_position, checked} or {ok: False, error}."""
+    print(">> IDENTIFY mode (1:N), finger first:", finger or "any")
+
+    def progress(p):
+        if on_progress:
+            on_progress(p)
+
+    probe_loaded = False
+    try:
+        # A finger left on from a previous scan must not be taken as this one.
+        fp.wait_for_finger_removed(FINGER_TIMEOUT_MS)
+        progress({"stage": "place", "scan": 1, "of": 1})
+        print(">> place finger")
+        if not fp.capture_when_pressed(FINGER_TIMEOUT_MS):
+            return {"ok": False, "error": fp.last_error or "capture_failed"}
+        probe = fp.make_template()
+        fp.set_led(False)
+        if not probe or len(probe) != TEMPLATE_SIZE:
+            return {"ok": False, "error": fp.last_error or "bad_finger"}
+        fp.delete(SCRATCH_SLOT)
+        if not fp.set_template(SCRATCH_SLOT, probe):
+            return {"ok": False, "error": fp.last_error or "sensor_error"}
+        probe_loaded = True
+        progress({"stage": "searching", "checked": 0, "total": None})
+
+        offset = checked = 0
+        started = utime.ticks_ms()
+        while True:
+            page = device_api.get_fingerprint_candidates(finger, offset, IDENTIFY_PAGE)
+            if page is None:
+                return {"ok": False, "error": "backend_unreachable"}
+            items = page.get("items") or []
+            for c in items:
+                data = ubinascii.a2b_base64(c["template_data"])
+                if len(data) != TEMPLATE_SIZE:
+                    continue
+                checked += 1
+                if fp.verify_template(SCRATCH_SLOT, data):
+                    print(">> identify: MATCH %s %s after %d comparisons, %d ms" % (
+                        c["patient_id"], c["finger_position"], checked,
+                        utime.ticks_diff(utime.ticks_ms(), started)))
+                    return {"ok": True, "match": True, "patient_id": c["patient_id"],
+                            "finger_position": c["finger_position"], "checked": checked}
+            offset += len(items)
+            if not items or offset >= page.get("total", 0):
+                break
+            progress({"stage": "searching", "checked": checked, "total": page.get("total")})
+        print(">> identify: no match in %d templates, %d ms" % (
+            checked, utime.ticks_diff(utime.ticks_ms(), started)))
+        return {"ok": True, "match": False, "checked": checked}
+    except SensorError as e:
+        print(">> sensor error during identify:", e)
+        return {"ok": False, "error": "sensor_error"}
+    finally:
+        try:
+            fp.set_led(False)
+            if probe_loaded:
+                fp.delete(SCRATCH_SLOT)
+        except SensorError:
+            pass
