@@ -36,6 +36,9 @@ JIT compiler running in the browser anymore.
    "Tailwind CSS — precompiled & inlined at build time") with the contents
    of `output.min.css`.
 
-`tailwind.config.js` here mirrors the font-family override that used to live
-in the inline `tailwind.config = {...}` script (Inter/Calibri for both the
-`sans` and `mono` families, per the single-font-family requirement).
+`tailwind.config.js` sets the single font family (Geist/Calibri for both the
+`sans` and `mono` families, per the single-font-family requirement) and the
+border-radius scale (`rounded` = 6px, `rounded-lg` = 12px).
+
+Always rebuild after adding a class instead of hand-patching utilities into a
+second `<style>` block — that is how the unclosed `<style>` tag bug happened.

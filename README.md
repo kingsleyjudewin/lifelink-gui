@@ -13,15 +13,16 @@ LifeLink is engineered to look and feel like **certified medical equipment**, **
 - **Visual Inspirations:** Swiss International Typographic Style, Windows XP Professional high-contrast ledger lines, Modern Apple Human Interface Guidelines, and Medical Device Dashboards.
 - **Strictly Avoids:** Neon colors, glassmorphism, gaming aesthetics, consumer startup dashboards, and extraneous animations.
 - **Primary Design Tokens:**
-  - **Background:** `#FAFAFA`
-  - **Primary Text:** `#1A1A1A`
-  - **Secondary Text:** `#666666`
-  - **Border:** `#D9D9D9`
-  - **Primary Button:** `#1A1A1A` with `#FFFFFF` text (tactile metallic gradient)
+  - **Background:** `#FFFFFF` (pure white canvas; muted surfaces `#F7F7F8`)
+  - **Primary Text / Ink:** `#111113`
+  - **Secondary Text:** `#6B6B72`
+  - **Border:** `#E4E4E7` hairlines (strong `#D4D4D8`, light `#F1F1F3`), one cool-grey family
+  - **Primary Button:** solid ink `#111113` with `#FFFFFF` text, soft ink-tinted shadow, press-scale feedback
+  - **Elevation:** ultra-diffuse ink-tinted shadows only (`--shadow-card`), no harsh drop shadows
   - **Success / Validated:** `#3A7A3A`
   - **Warning / Review:** `#B58B00`
   - **Critical Alert / Anaphylaxis:** `#A12A2A`
-- **Typography:** Inter, a single professional sans-serif typeface used throughout the entire interface (fallback: Calibri).
+- **Typography:** Geist, a single professional sans-serif typeface used throughout the entire interface (fallback: Calibri); Material Symbols at a light 300 weight.
 - **Touchscreen Ergonomics:** Generous touch targets (48px+ minimum height), zero keyboard reliance required, rapid 1-tap selectors, and persistent Back button on every screen.
 
 ---

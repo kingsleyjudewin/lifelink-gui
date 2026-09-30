@@ -393,6 +393,12 @@ def index():
     return send_from_directory(PROJECT_ROOT, "index.html")
 
 
+@app.route("/i18n/<path:filename>")
+def i18n_file(filename):
+    # Vendored i18next + UI translations (kept local so the kiosk works offline).
+    return send_from_directory(PROJECT_ROOT / "i18n", filename)
+
+
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename):
     return send_from_directory(UPLOADS_DIR, filename)

@@ -398,6 +398,75 @@ Device error codes → UI text in `index.html`:
 | No webcam available for the photo step (it used browser `getUserMedia`) | New `photo_capture` camera mode: backend (`CAMERA_MODES`, `/health` `request`, `/capture` photo branch, in-memory photo store), camera client `scan_photo()`, GUI photo page rewritten, DB mode constraint updated (**re-run `iris-module/db/schema.sql`**) |
 | `install_services.sh` / `install_pizero.sh` write `ExecStart=$REPO/...` unquoted; repo path `life link gui` has spaces → systemd runs `.../life` (verified with `systemd-analyze verify`) | **Open** — quote the paths, or clone into a folder without spaces |
 
+### 2026-09-30 — regional languages (i18next)
+- Language switcher (top-left header button, `translate` icon): English,
+  Hindi, Tamil, Malayalam, Telugu, Kannada, Assamese. Choice persists in
+  `localStorage['lifelink_language']`.
+- `i18n/i18next.min.js` (v23, vendored for offline use), `i18n/translations.js`
+  (one row per English string: `[en, hi, ta, ml, te, kn, as]`, matched
+  case-insensitively; `{{name}}` rows are patterns for runtime text such as
+  fingerprint scan prompts), `i18n/lifelink-i18n.js` (translates DOM text
+  nodes + `placeholder`/`title` in place, MutationObserver for later renders).
+  Flask serves them at `/i18n/<file>`.
+- Deliberately left in English: patient data, audit-log entries, technical
+  specs (ISO numbers, serials, CPU/RAM), `alert()` dialogs, header breadcrumb.
+  Adding a string = appending a row. Mark an element `data-no-i18n` to exclude it.
+- i18next reserves `count` for plurals, so pattern placeholders use `{{n}}`.
+- Indic scripts use Noto Sans (Google Fonts); letter-spacing is reset for them.
+  On the offline Pi install `fonts-noto-core` so glyphs render without the CDN.
+
+| Issue | Fix / status |
+|---|---|
+| Second `<style>` block in `<head>` (extra Tailwind utilities) was never closed → the design-tokens block's `<!-- -->`/`<style>` were parsed as CSS, swallowing the `:root` rule (all `var(--…)` empty) and invalidating the `@import`s (Inter + Material Symbols never loaded; icons showed as words like `person_add`) | Added the missing `</style>` |
+
+### 2026-09-30 — visual refinement ("taste-skill", redesign-existing-projects)
+- Canvas is pure `#FFFFFF`; one cool-grey family (`#F7F7F8` surfaces, `#E4E4E7`
+  borders, `#6B6B72` secondary text), ink `#111113`. Status colours unchanged.
+- Colour classes were remapped in the markup/JS templates (657 replacements)
+  and Tailwind rebuilt (tools/build-tailwind.md); the hand-patched second
+  utility `<style>` block was removed because the rebuild now contains it.
+- Font Inter → Geist (still a single family). Radius scale 6px/12px.
+- `.btn-metallic*` keep their class names but are now flat ink/white/red/green
+  buttons with soft tinted shadows and press-scale feedback; inputs get a 3px
+  focus ring; pages settle in with a 0.32s fade (off under reduced-motion).
+- Skills installed to `.claude/skills/` by `npx skills add Leonxlnx/taste-skill`
+  (+ `skills-lock.json`).
+- Header (user request): breadcrumb + "HARDWARE REVISION" block and its status
+  dot removed (router no longer writes `#global-breadcrumb`). Clock shows
+  Indian Standard Time via `Intl` with `timeZone: 'Asia/Kolkata'` (label IST),
+  independent of the Pi's system timezone; the date uses the UI language
+  (`hi-IN`, `ta-IN`, ...). "LIFELINK" wordmark, tagline and `document.title`
+  are translated.
+
+### 2026-09-30 — fit-to-screen layout for the 800×480 display
+- Before: at 800 px the `lg:` preview/controls split never kicked in, so
+  controls stacked under the preview (fingerprint 878 px, iris 1043 px, photo
+  765 px, identify 847 px tall); the iris preview and its button were never on
+  screen together, and on Identify the patient list sat below the scan buttons.
+- Now (`@media (max-height:560px) and (min-width:640px)` in index.html):
+  fingerprint / iris / photo / identify are exactly one screen, no scrolling —
+  preview left, controls right, Back/Continue pinned under the controls.
+  Hook classes in the markup: `capture-page`, `capture-head`, `capture-grid`,
+  `capture-preview`, `capture-side`, `capture-card`, `capture-actions`,
+  `capture-nav`, `identify-*`; decorative telemetry is `compact-hide`.
+  Identify: methods left, patient archive right (own scroll); while an iris
+  scan runs (`#auth-iris-preview-wrap` shown) the fingerprint option folds away.
+  Header is a fixed 52 px there; page height = `100dvh - 72px`.
+- Long forms (patient info, medical info, summary, review) still scroll but
+  their `.page-nav` Back/Continue bar is sticky at the bottom on compact panels.
+- Verified at 800×480 in all 7 UI languages: no page or panel overflow;
+  desktop (≥ 561 px tall) layout unchanged.
+- Home: "Quick Reference Dossier" demo strip (hard-coded LL-8942-A shortcuts)
+  removed at the user's request, with its only caller `goToPatientView` and
+  its 3 translation rows.
+- Fingerprint + iris pages decluttered (user request, all screen sizes): no
+  "MODULE:" line, status/ISO badges, viewport header/footer readouts (POS,
+  surface temp, DPI, FPS/gain, DIST/ILLUM), fingerprint grid background,
+  anatomical ID, "Enrollment Matrix"/"Ocular selection"/"Lateral sector"
+  labels, or bolt/skip icons on the secondary buttons. The platen graphic with
+  its scan line and the iris reticle/live preview stay. Their JS updaters and
+  translation rows were removed too.
+
 ### Data cleanup done
 - 9 legacy prints wiped from the sensor (slots 0–8, old design).
 - 4 corrupt 312-byte template rows deleted from Postgres.

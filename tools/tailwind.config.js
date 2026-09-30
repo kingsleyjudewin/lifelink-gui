@@ -3,8 +3,12 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'Calibri', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
-        mono: ['Inter', 'Calibri', '-apple-system', 'BlinkMacSystemFont', 'sans-serif']
+        sans: ['Geist', 'Calibri', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        mono: ['Geist', 'Calibri', '-apple-system', 'BlinkMacSystemFont', 'sans-serif']
+      },
+      borderRadius: {
+        DEFAULT: '6px',
+        lg: '12px'
       }
     }
   },
